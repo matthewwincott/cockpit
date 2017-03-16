@@ -23,11 +23,8 @@ class NanomoverDevice(stage.StageDevice):
         self.curPosition = [14500, 14500, 14500]
         ## Connection to the Nanomover controller program.
         self.connection = None
-        ## Soft safety motion limits. 
-#        self.safeties = [[4000, 25000], [4000, 25000], [7300, 25000]]
         # Maps the cockpit's axis ordering (0: X, 1: Y, 2: Z) to the
         # XY stage's ordering (1: Y, 2: X,0: Z)
- 
         self.axisMapper = {0: 2, 1: 1, 2: 0}
         ## Maps cockpit axis ordering to a +-1 multiplier to apply to motion,
         # since some of our axes are flipped.
@@ -59,7 +56,11 @@ class NanomoverDevice(stage.StageDevice):
                 self.safeties = [[4000, 25000],
                                    [4000, 25000],
                                    [7300, 25000]]
-#            events.subscribe('user logout', self.onLogout)
+
+            #a usful middle position for after a home
+            self.middleXY=( (self.safeties[0,1]-self.safteies[0,0])/2.0,
+                            self.safeties[0,1]-self.safteies[0,0])/2.0)
+                #            events.subscribe('user logout', self.onLogout)
             events.subscribe('user abort', self.onAbort)
 #            events.subscribe('macro stage xy draw', self.onMacroStagePaint)
             events.subscribe('cockpit initialization complete',
@@ -68,12 +69,14 @@ class NanomoverDevice(stage.StageDevice):
         
 
     def initialize(self):
-        print "in init"
         self.connection = util.connection.Connection(
                 'nano', self.ipAddress, self.port)
         self.connection.connect(self.receiveData)
-        self.connection.connection.startOMX()
         self.curPosition[:] = self.connection.connection.posXYZ_OMX()
+        if self.curPosition == [0,0,0]:
+            print "Homing Nanomover"
+            self.connection.connection.startOMX()
+            interfaces.stageMover.goToXY(self.middleXY, shouldBlock = True)
         print self.curPosition
 #        for axis, (minVal, maxVal) in enumerate(self.safeties):
 #            try:
@@ -98,30 +101,6 @@ class NanomoverDevice(stage.StageDevice):
 #                        style = wx.ICON_EXCLAMATION | wx.OK).ShowModal()
 #                self.connection.connection.setSafetyMaxOMX(axis, newTarget)
 #                self.safeties[axis][1] = newTarget
-
-        # Set the field diaphragm to fully open.
-        # Angles for the various diaphragm positions are 45 degrees apart,
-        # with a 3-degree offset. NB we assume that the user will never
-        # want anything but a fully-open diaphragm because we have the
-        # fiber mode selector which accomplishes the same purpose, but better.
-#        self.connection.connection.fd_move(93, 4)
-
-
-    # ## Generate the fiber mode selector control.
-    # def makeUI(self, parent):
-    #     sizer = wx.BoxSizer(wx.VERTICAL)
-    #     label = wx.StaticText(parent, -1, "Fiber mode:")
-    #     label.SetFont(wx.Font(14, wx.DEFAULT, wx.NORMAL, wx.BOLD))
-    #     sizer.Add(label)
-    #     for mode in ['Full field', 'Spotlight']:
-    #         button = gui.toggleButton.ToggleButton(
-    #                 textSize = 12, label = mode, size = (100, 50),
-    #                 parent = parent)
-    #         button.Bind(wx.EVT_LEFT_DOWN,
-    #                 lambda event, mode = mode: self.setFiberMode(mode))
-    #         sizer.Add(button)
-    #         self.fiberModeButtons.append(button)
-    #     return sizer
 
 
     ## We want to periodically exercise the XY stage to spread the grease
@@ -152,7 +131,7 @@ class NanomoverDevice(stage.StageDevice):
                 print "Rep %d of 5..." % i
                 for position in self.softlimits:
                     interfaces.stageMover.goToXY(position, shouldBlock = True)
-            interfaces.stageMover.goToXY((0, 0), shouldBlock = True)
+            interfaces.stageMover.goToXY(self.middleXY, shouldBlock = True)
             interfaces.stageMover.goToXY(initialPos, shouldBlock = True)
             print "Exercising complete. Thank you!"
             
@@ -170,6 +149,7 @@ class NanomoverDevice(stage.StageDevice):
     def makeInitialPublications(self):
         events.publish('new status light', 'stage vertical position', '')
         self.publishPosition()
+        self.sendXYPositionUpdates()
 #        self.setFiberMode('Full field')
 
     ## The XY Macro Stage view is painting itself; draw the banned
@@ -222,28 +202,23 @@ class NanomoverDevice(stage.StageDevice):
                 label, color)
 
 
-    # ## Set the fiber mode. We can switch between a fiber that fully illuminates
-    # # the sample, and one that focuses light on a small area.
-    # def setFiberMode(self, mode):
-    #     index = int(mode == 'Full field')
-    #     self.moveFiberCoffin(coffinPositions[index])
-    #     self.moveFiberCrypt(cryptPositions[index])
-    #     for button in self.fiberModeButtons:
-    #         button.setActive(button.GetLabel() == mode)
-
-
-    # ## Move the fiber motor in the coffin (optical table with all the lasers).
-    # def moveFiberCoffin(self, position):
-    #     delta = abs(position - self.connection.connection.fiberSelector_pos())
-    #     if delta > MIN_FIBER_MOTION_DELTA:
-    #         self.connection.connection.fiberSelector_move(position, 2.5)
-
-            
-    # ## Move the fiber motor in the crypt (closet with the objective and sample)
-    # def moveFiberCrypt(self, position):
-    #     delta = abs(position - self.connection.connection.vp_getPosStatus()[0])
-    #     if delta > MIN_FIBER_MOTION_DELTA:
-    #         self.connection.connection.vp_move(position, 20)
+    ## Send updates on the XY stage's position, until it stops moving.
+    @util.threads.callInNewThread
+    def sendXYPositionUpdates(self):
+        while True:
+            prevX, prevY = self.xyPositionCache
+            x, y = self.getXYPosition(shouldUseCache = False)
+            delta = abs(x - prevX) + abs(y - prevY)
+            if delta < 5.:
+                # No movement since last time; done moving.
+                for axis in [0, 1]:
+                    events.publish('stage stopped', '%d nanomover' % axis)
+                return
+            for axis, val in enumerate([x, y]):
+                events.publish('stage mover', '%d nanomover' % axis, axis,
+                        self.axisSignMapper[axis] * val)
+            curPosition = (x, y)
+            time.sleep(.1)
 
 
     ## Receive information from the Nanomover control program.
@@ -259,12 +234,13 @@ class NanomoverDevice(stage.StageDevice):
     ## Move a specific axis to a given position.
     def moveAbsolute(self, axis, pos):
         self.connection.connection.moveOMX_axis(axis, pos)
+        self.sendXYPositionUpdates()
 
 
     ## Move a specific axis by a given amount.
     def moveRelative(self, axis, delta):
         self.connection.connection.moveOMX_dAxis(axis, delta)
-
+        self.sendXYPositionUpdates()
 
     ## Get the position along the given axis.
     def getPosition(self, axis):
@@ -284,9 +260,8 @@ class NanomoverDevice(stage.StageDevice):
     def onAbort(self, *args):
         self.connection.connection.stopOMX()
 
+    #functiojn to home stage if needed.
+    def home(self):
+        self.connection.connection.findHome_OMX()
+        
 
-    ## User is interacting with the remote; start motion in the specified
-    # direction.
-    # \param direction -1 for negative, +1 for positive.
-#    def onRemoteStart(self, axis, direction):
-#        self.moveAbsolute(axis, self.safeties[axis][direction > 0])
