@@ -27,6 +27,7 @@ from handlers.deviceHandler import STATES
 from toggleButton import ACTIVE_COLOR, INACTIVE_COLOR
 from util import userConfig
 import gui.loggingWindow as log
+import events
 
 ## @package gui.device
 # Defines classes for common controls used by cockpit devices.
@@ -35,6 +36,8 @@ import gui.loggingWindow as log
 DEFAULT_SIZE = (120, 24)
 ## Small size
 SMALL_SIZE = (60, 18)
+## Tall size
+TALL_SIZE = (DEFAULT_SIZE[0], 64)
 ## Default font
 DEFAULT_FONT = wx.Font(12, wx.DEFAULT, wx.NORMAL, wx.BOLD)
 ## Small font
@@ -67,6 +70,18 @@ class Button(wx.StaticText):
             self.Bind(wx.EVT_LEFT_UP, lambda event: leftAction(event))
         if rightAction:
             self.Bind(wx.EVT_RIGHT_DOWN, lambda event: rightAction(event))
+
+
+    def update(self, value=None):
+        """Update the label.
+
+        self.value may be a function or a string."""
+        if value is not None:
+            self.value = value
+        if callable(self.value):
+            self.SetLabel(self.value())
+        else:
+            self.SetLabel(self.value)
 
 
     ## Override of normal StaticText SetLabel, to try to vertically
@@ -103,14 +118,14 @@ class ValueDisplay(wx.BoxSizer):
         super(ValueDisplay, self).__init__(wx.HORIZONTAL)
         self.value = value
         label = Label(
-                parent=parent, label=(' ' + label.strip(':') + ':'),
-                size=SMALL_SIZE, style=wx.ALIGN_LEFT)
+            parent=parent, label=(' ' + label.strip(':') + ':'),
+            size=SMALL_SIZE, style=wx.ALIGN_LEFT)
         label.SetFont(SMALL_FONT)
         self.label = label
         self.Add(label)
         self.valDisplay = Label(
-                parent=parent, label=str(value),
-                size=SMALL_SIZE, style=(wx.ALIGN_RIGHT | wx.ST_NO_AUTORESIZE))
+            parent=parent, label=str(value),
+            size=SMALL_SIZE, style=(wx.ALIGN_RIGHT | wx.ST_NO_AUTORESIZE))
         self.valDisplay.SetFont(SMALL_FONT)
         self.Add(self.valDisplay)
         self.formatStr = (formatStr or r'%.6s') + (unitStr or '') + ' '
@@ -129,12 +144,16 @@ class ValueDisplay(wx.BoxSizer):
         return self.valDisplay.Enable()
 
 
-    def updateValue(self, value=None):
+    def update(self, value=None):
+        """Update the displayed value.
+
+        self.value may be a function or a string."""
         if value is not None:
-            if self.value == value:
-                return
             self.value = value
-        self.valDisplay.SetLabel(self.formatStr % self.value)
+        if callable(self.value):
+            self.valDisplay.SetLabel(self.formatStr % self.value())
+        else:
+            self.valDisplay.SetLabel(self.formatStr % self.value)
 
 
 class MultilineDisplay(wx.StaticText):
@@ -207,7 +226,7 @@ class SettingsEditor(wx.Frame):
 
 
     def __init__(self, device, handler=None):
-        wx.Frame.__init__(self, None, wx.ID_ANY)
+        wx.Frame.__init__(self, None, wx.ID_ANY, style=wx.DEFAULT_FRAME_STYLE & ~wx.CLOSE_BOX)
         self.device = device
         self.SetTitle("Settings for %s." % device.name)
         self.settings = None
@@ -226,26 +245,42 @@ class SettingsEditor(wx.Frame):
 
         sizer.AddSpacer(2)
         buttonSizer = wx.BoxSizer(wx.HORIZONTAL)
-        saveButton = wx.Button(self, id=wx.ID_SAVE)
-        saveButton.SetToolTipString("Save current settings as defaults.")
-        saveButton.Bind(wx.EVT_BUTTON, self.onSave)
-        buttonSizer.Add(saveButton, 0, wx.ALIGN_RIGHT, 0, 0)
+        #saveButton = wx.Button(self, id=wx.ID_SAVE)
+        #saveButton.SetToolTipString("Save current settings as defaults.")
+        #saveButton.Bind(wx.EVT_BUTTON, self.onSave)
+        #buttonSizer.Add(saveButton, 0, wx.ALIGN_RIGHT, 0, 0)
 
-        closeButton = wx.Button(self, id=wx.ID_OK)
-        closeButton.Bind(wx.EVT_BUTTON, self.onClose)
-        closeButton.SetToolTipString("Close this window.")
-        buttonSizer.Add(closeButton, 0, wx.ALIGN_RIGHT)
+        okButton = wx.Button(self, id=wx.ID_OK)
+        okButton.Bind(wx.EVT_BUTTON, self.onClose)
+        okButton.SetToolTipString("Apply settings and close this window.")
+        buttonSizer.Add(okButton, 0, wx.ALIGN_RIGHT)
+
+        cancelButton = wx.Button(self, id=wx.ID_CANCEL)
+        cancelButton.Bind(wx.EVT_BUTTON, self.onClose)
+        cancelButton.SetToolTipString("Close this window without applying settings.")
+        buttonSizer.Add(cancelButton, 0, wx.ALIGN_RIGHT)
+
+        applyButton = wx.Button(self, id=wx.ID_APPLY)
+        applyButton.SetToolTipString("Apply these settings.")
+        applyButton.Bind(wx.EVT_BUTTON, lambda evt: self.device.updateSettings(self.current))
+        buttonSizer.Add(applyButton, 0, wx.ALIGN_RIGHT)
 
         sizer.Add(buttonSizer, 0, wx.ALIGN_CENTER, 0, 0)
         self.SetSizerAndFit(sizer)
         self.SetMinSize((256, -1))
         #self.SetMaxSize((self.GetMinWidth(), -1))
+        events.subscribe("%s settings changed" % self.device, self.updateGrid)
+
 
     def onEnabledEvent(self, evt):
         if self.IsShown():
             self.updateGrid()
 
+
     def onClose(self, evt):
+        events.unsubscribe("%s settings changed" % self.device, self.updateGrid)
+        if evt.GetId() == wx.ID_OK:
+            self.device.updateSettings(self.current)
         self.Close()
         # Do stuff to update local device state.
 
@@ -273,13 +308,13 @@ class SettingsEditor(wx.Frame):
         else:
             raise Exception('Unsupported type.')
 
-        if self.handler:
-            self.handler.reset_cache()
-        self.device.set_setting(name, value)
+        self.current[name] = value
+        if value != self.device.settings[name]:
+            prop.SetTextColour(wx.Colour(255, 0, 0))
+        else:
+            prop.SetTextColour(wx.Colour(0, 0, 0))
         self.grid.SelectProperty(prop)
-        self.Freeze()
-        self.updateGrid()
-        self.Thaw()
+
 
     def onSave(self, event):
         settings = self.grid.GetPropertyValues()
@@ -289,22 +324,27 @@ class SettingsEditor(wx.Frame):
         userConfig.setValue(self.handler.getIdentifier() + '_SETTINGS',
                             settings)
 
+
     def updateGrid(self):
+        if not self.IsShown():
+            return
+        self.Freeze()
         grid = self.grid
         self.settings = OrderedDict(self.device.describe_settings())
-        current = self.device.get_all_settings()
+        self.current.update(self.device.settings)
         # Update all values.
         # grid.SetValues(current)
         # Enable/disable
         for prop in grid.Properties:
+            prop.SetTextColour(wx.Colour(0, 0, 0))
             name = prop.GetName()
             desc = self.settings[name]
             if desc['type'] in ('enum'):
                 prop.SetChoices([str(v) for v in desc['values']],
                                 range(len(desc['values'])))
-                prop.SetValue(desc['values'].index(current[name]))
+                prop.SetValue(desc['values'].index(self.current[name]))
             else:
-                value = current[name]
+                value = self.current[name]
                 if type(value) is long:
                     value = int(value)
                 prop.SetValue(value)
@@ -313,14 +353,15 @@ class SettingsEditor(wx.Frame):
             except wx._core.PyAssertionError:
                 # Bug in wx in stc.EnsureCaretVisible, could not convert to a long.
                 pass
+        self.Thaw()
 
 
     def populateGrid(self):
         grid = self.grid
         self.settings = OrderedDict(self.device.describe_settings())
-        current = self.device.get_all_settings()
+        self.current = self.device.get_all_settings()
         for key, desc in self.settings.iteritems():
-            value = current[key]
+            value = self.current[key]
             # For some reason, a TypeError is thrown on creation of prop if value
             # is a zero-length string.
             if value == '':
