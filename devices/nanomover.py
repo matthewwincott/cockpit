@@ -113,7 +113,8 @@ class NanomoverDevice(stage.StageDevice):
                 for position in self.softlimits[0:2]:
                     interfaces.stageMover.goToXY(position, shouldBlock = True)
             interfaces.stageMover.goToXY(self.middleXY, shouldBlock = True)
-            interfaces.stageMover.goToXY(initialPos, shouldBlock = True)
+            #move back to inital pos, but only in XY
+            interfaces.stageMover.goToXY(initialPos[:2], shouldBlock = True)
             print "Exercising complete. Thank you!"
             
             util.userConfig.setValue('NanomoverLastExerciseTimestamp',
@@ -188,7 +189,7 @@ class NanomoverDevice(stage.StageDevice):
             prevX, prevY = self.positionCache[:2]
             x, y, z = self.getPosition(shouldUseCache = False)
             delta = abs(x - prevX) + abs(y - prevY)
-            if delta < 2:
+            if delta < 2.:
                 # No movement since last time; done moving.
                 for axis in [0, 1]:
                     events.publish('stage stopped', '%d nanomover' % axis)
@@ -214,7 +215,7 @@ class NanomoverDevice(stage.StageDevice):
     def receiveData(self, *args):
         if args[0] == 'nanoMotionStatus':
             self.curPosition[:] = args[1]
-            self.publishPosition()
+            #self.publishPosition()
             if args[-1] == 'allStopped':
                 for i in xrange(3):
                     events.publish('stage stopped', '%d nanomover' % i)
