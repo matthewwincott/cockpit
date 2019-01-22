@@ -354,6 +354,7 @@ class MosaicWindow(wx.Frame, MosaicCommon):
 
         ## Camera used for making a mosaic
         self.camera = None
+        self.autoSave = False
 
         ## Mosaic tile overlap
         self.overlap = 0.0
@@ -395,6 +396,9 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                  "images collected with the current lights and one " +
                  "camera. Click the Abort button to stop. Right-click " +
                  "to continue a previous mosaic."),
+                ('Enable Autosave', self.toggleAutoSave, None,
+                 "Toggle Autosaving of the mosaic images as they are "+
+                 "collected"),
                 ('Find stage', self.centerCanvas, None,
                  "Center the mosaic view on the stage and reset the " +
                  "zoom level"),
@@ -775,6 +779,9 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                 stderr.write("Mosaic stopping - problem in getCameraScaling: %s\n" % str(e))
                 continue
 
+            if self.autoSave:
+                self.saveImage(pos[0],pos[1],curZ,data)
+
             # Paint the tile at the stage position at which image was captured.
             self.canvas.addImage(data,
                                  ( -pos[0] + self.offset[0] - width / 2,
@@ -822,6 +829,8 @@ class MosaicWindow(wx.Frame, MosaicCommon):
         height *= objective.getPixelSize()
         x, y, z = cockpit.interfaces.stageMover.getPosition()
         data = cockpit.gui.camera.window.getImageForCamera(camera)
+        if self.autoSave:
+            self.saveImage(x,y,z,data)
         self.canvas.addImage(data, (-x +self.offset[0]- width / 2,
                                     y-self.offset[1] - height / 2,
                                     z-self.offset[2]),
@@ -829,6 +838,20 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                 scalings = cockpit.gui.camera.window.getCameraScaling(camera))
         self.Refresh()
 
+    ## function to toggle the autosave on and off
+    def toggleAutoSave(self):
+        self.autoSave = not self.autoSave
+        if self.autoSave:
+            wx.CallAfter(self.nameToButton['Enable Autosave'].SetLabel,
+                         'Disable Autosave')
+        else:
+            wx.CallAfter(self.nameToButton['Enable Autosave'].SetLabel, 'Enable Autosave')
+
+    #function to actually save autosave images. 
+    def saveImage(self,x,y,z,data):
+        print ('saving %f,%f,%f' % (x,y,z))
+            
+        
     def togglescalebar(self):
         #toggle the scale bar between 0 and 1.
         if (self.scalebar!=0):
