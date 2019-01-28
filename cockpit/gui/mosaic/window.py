@@ -673,6 +673,18 @@ class MosaicWindow(wx.Frame, MosaicCommon):
         if self.mosaicThread is None or not self.mosaicThread.is_alive():
             self.shouldReconfigure = True
             self.shouldRestart = True
+            # self.saver=dataSaver.DataSaver(self.cameras, self.numReps,
+            #                             self.cameraToImageCount,
+            #                             self.cameraToIgnoredImageIndices,
+            #                             self._run_thread, self.savePath,
+            #                             self.sliceHeight, self.generateTitles(),
+            #                             cameraToExcitation)
+            # saver.startCollecting()
+            # saveThread = threading.Thread(target=saver.executeAndSave,
+            #                               name="Experiment-execute-save")
+            # saveThread.start()
+
+            
             self.mosaicThread = threading.Thread(target=self.mosaicLoop, name="mosaic")
             self.mosaicThread.start()
         if self.shouldContinue.is_set():
@@ -842,15 +854,23 @@ class MosaicWindow(wx.Frame, MosaicCommon):
     def toggleAutoSave(self):
         self.autoSave = not self.autoSave
         if self.autoSave:
+            self.posArray=[]
             wx.CallAfter(self.nameToButton['Enable Autosave'].SetLabel,
                          'Disable Autosave')
         else:
             wx.CallAfter(self.nameToButton['Enable Autosave'].SetLabel, 'Enable Autosave')
 
     #function to actually save autosave images. 
+ #   @cockpit.util.threads.callInMainThread
     def saveImage(self,x,y,z,data):
-        print ('saving %f,%f,%f' % (x,y,z))
-            
+        #append current pos to posArray list for later storage
+        self.posArray.append((x,y,z))
+        print (self.posArray)
+    #store the saved positions in the datasaver file
+    def storePositions(self):
+        pass
+        #loop over self.posArray and store in self.saver.filehandles[x]
+        
         
     def togglescalebar(self):
         #toggle the scale bar between 0 and 1.
