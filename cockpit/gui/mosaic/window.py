@@ -77,6 +77,7 @@ import cockpit.util.user
 import cockpit.util.threads
 import cockpit.util.userConfig
 import math
+import cockpit.experiment.dataSaver
 
 ## Size of the crosshairs indicating the stage position.
 CROSSHAIR_SIZE = 10000
@@ -355,7 +356,7 @@ class MosaicWindow(wx.Frame, MosaicCommon):
         ## Camera used for making a mosaic
         self.camera = None
         self.autoSave = False
-
+        self.saveThread=None
         ## Mosaic tile overlap
         self.overlap = 0.0
 
@@ -865,12 +866,51 @@ class MosaicWindow(wx.Frame, MosaicCommon):
     def saveImage(self,x,y,z,data):
         #append current pos to posArray list for later storage
         self.posArray.append((x,y,z))
-        print (self.posArray)
+        if self.saveThread is None:
+            ##open a new file sand start a savethread
+
+            #define a saver to save the incioming data. 
+            saver = cockpit.experiment.dataSaver.DataSaver([self.camera], 1000,
+                                        {self.camera: 1000},
+                                        {self.camera: set()},
+                                        self.mosaicThread, '/Users/ian/src/mosaic.dv',
+                                        0, self.generateTitles(),
+                                         {self.camera: 0})
+            saver.startCollecting()
+            self.saveThread = threading.Thread(target=saver.executeAndSave,
+                                          name="Experiment-execute-save")
+            self.saveThread.start()
+
+#        cleanup_thread = threading.Thread(target=self.cleanup,
+ #                                         args=[self._run_thread, saveThread],
+  #                                        name="Experiment-cleanup")
+   #     cleanup_thread.start()
+
+
+#        print (self.posArray)
     #store the saved positions in the datasaver file
     def storePositions(self):
         pass
         #loop over self.posArray and store in self.saver.filehandles[x]
         
+    ## Generate the "titles" that provide extra miscellaneous information
+    # about the experiment. These are part of the MRC file format spec:
+    # http://msg.ucsf.edu/IVE/IVE4_HTML/IM_ref2.html
+    # There can be up to 10 titles and they can have up to 80 characters each.
+    # We group them by device type.
+    def generateTitles(self):
+        titles = [
+                "Date & time: %s; pos: %s" % (
+                    time.strftime('%Y/%m/%d %H:%M:%S'),
+                    str(['%.2f' % p for p in (cockpit.interfaces.stageMover.getPosition())])
+                )
+        ]
+        # Append the metadata we were given to start.
+        if len(titles) > 10:
+            raise RuntimeError("Have too much miscellaneous information to fit into the \"titles\" section of the MRC file (max 10 lines). Lines are:\n%s" % "\n".join(titles))
+        return titles
+
+
         
     def togglescalebar(self):
         #toggle the scale bar between 0 and 1.
