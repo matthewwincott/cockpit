@@ -148,12 +148,19 @@ class Image(BaseGL):
     uniform float scale;
     uniform float offset;
     uniform bool show_clip;
+    uniform int colour;
 
     void main()
     {
         vec4 lum = clamp(offset + texture2D(tex, gl_TexCoord[0].st) / scale, 0., 1.);
         if (show_clip) {
             gl_FragColor = vec4(0., 0., lum.r == 0, 1.) + vec4(1., lum.r < 1., 1., 1.) * lum.r;
+        } else if (colour == 1) {
+            gl_FragColor = vec4(lum.r, 0, 0, 1.);
+        } else if (colour == 2) {
+            gl_FragColor = vec4(0, lum.r, 0, 1.);
+        } else if (colour == 3) {
+            gl_FragColor = vec4(0, 0, lum.r, 1.);
         } else {
             gl_FragColor = vec4(lum.r, lum.r, lum.r, 1.);
         }
@@ -170,6 +177,8 @@ class Image(BaseGL):
         self.shape = (0, 0)
         ## Should we use colour to indicate range clipping?
         self.clipHighlight = False
+        ## colour to indicate fl emission
+        self.colour = 0
         # Data
         self._data = None
         # Minimum and maximum data value - used for setting greyscale range.
@@ -214,6 +223,16 @@ class Image(BaseGL):
 
     def toggleClipHighlight(self, event=None):
         self.clipHighlight = not self.clipHighlight
+
+    def falseColRed(self,event=None):
+        self.colour = 1
+    def falseColGreen(self,event=None):
+        self.colour = 2
+    def falseColBlue(self,event=None):
+        self.colour = 3
+    def falseColGray(self,event=None):
+        self.colour = 0
+        
 
     def _createTextures(self):
         """Convert data to textures.
@@ -297,6 +316,7 @@ class Image(BaseGL):
         glUniform1f(glGetUniformLocation(shader, "offset"), self.offset)
         glUniform1f(glGetUniformLocation(shader, "zoom"), zoom)
         glUniform1i(glGetUniformLocation(shader, "show_clip"), self.clipHighlight)
+        glUniform1i(glGetUniformLocation(shader, "colour"), self.colour)
         # Render
         glEnable(GL_TEXTURE_2D)
         glEnableClientState(GL_VERTEX_ARRAY)
@@ -738,6 +758,10 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
         return [('Reset view', self.resetView),
                 ('Set histogram parameters', self.onSetHistogram),
                 ('Toggle clip highlighting', self.image.toggleClipHighlight),
+                ('Red',self.image.falseColRed),
+                ('Green',self.image.falseColGreen),
+                ('Blue',self.image.falseColBlue),
+                ('Gray',self.image.falseColGray),
                 ('', None),
                 ('Toggle alignment crosshair', self.toggleCrosshair),
                 ("Toggle FFT mode", self.toggleFFT),
