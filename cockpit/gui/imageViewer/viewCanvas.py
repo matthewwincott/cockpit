@@ -224,14 +224,8 @@ class Image(BaseGL):
     def toggleClipHighlight(self, event=None):
         self.clipHighlight = not self.clipHighlight
 
-    def falseColRed(self,event=None):
-        self.colour = 1
-    def falseColGreen(self,event=None):
-        self.colour = 2
-    def falseColBlue(self,event=None):
-        self.colour = 3
-    def falseColGray(self,event=None):
-        self.colour = 0
+    def falseCol(self,colour,event=None):
+        self.colour = colour
         
 
     def _createTextures(self):
@@ -758,10 +752,10 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
         return [('Reset view', self.resetView),
                 ('Set histogram parameters', self.onSetHistogram),
                 ('Toggle clip highlighting', self.image.toggleClipHighlight),
-                ('Red',self.image.falseColRed),
-                ('Green',self.image.falseColGreen),
-                ('Blue',self.image.falseColBlue),
-                ('Gray',self.image.falseColGray),
+                ('Red',lambda: self.image.falseCol(1)),
+                ('Green',lambda: self.image.falseCol(2)),
+                ('Blue', lambda: self.image.falseCol(3)),
+                ('Gray', lambda: self.image.falseCol(0)),
                 ('', None),
                 ('Toggle alignment crosshair', self.toggleCrosshair),
                 ("Toggle FFT mode", self.toggleFFT),
