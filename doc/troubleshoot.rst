@@ -98,3 +98,12 @@ In this example it can clearly be seen that ``cameraR`` is closed so
 is the device preventing cockpit from starting up.  This error was
 produced be deliberately connecting to the wrong port to generate an
 error on startup.
+
+Experiment problems
+===================
+
+The most complex section of the cockpit system is running experiments
+based on an external timing device. The code sets up a table,
+called an action table, that contains the timings and chnages in
+digital or analogue signals which is then uploaded to a device which
+runs this in a tight timning loop to 
