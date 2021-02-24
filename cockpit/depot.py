@@ -57,6 +57,8 @@
 import collections
 import configparser
 import os
+import time
+import Pyro4
 
 from cockpit.handlers.deviceHandler import DeviceHandler
 
@@ -75,6 +77,7 @@ OBJECTIVE = "objective"
 POWER_CONTROL = "power control"
 SERVER = "server"
 STAGE_POSITIONER = "stage positioner"
+STARTUP_TIMEOUT = 20.0
 
 SKIP_CONFIG = ['server']
 
@@ -140,6 +143,7 @@ class DeviceDepot:
         # Convert to list - python3 dict_values has no pop method.
         devices = list(self.nameToDevice.values())
         done = []
+        startupPause=True
         while devices:
             # TODO - catch circular dependencies.
             d = devices.pop(0)
@@ -156,6 +160,20 @@ class DeviceDepot:
                 devices.append(d)
                 continue
             yield d.name
+            if startupPause:
+                #give an opotunity for first device to pause startup while
+                #microsocpe starts
+                uri=d.config.get('uri')
+                if uri:
+                    start_time = time.time()
+                    print(uri)
+                    while (not self.testConnection(uri)
+                           and time.time() < start_time + STARTUP_TIMEOUT):
+                        time.sleep(5)
+                    if not self.testConnection(uri):
+                        raise RuntimeError("Failed to start the device server")
+                    startupPause = False
+                    
             self.initDevice(d)
             done.append(d.name)
 
@@ -299,6 +317,13 @@ class DeviceDepot:
         return axisToMovers
 
 
+    def testConnection(self,uri):
+        proxy = Pyro4.Proxy(uri)
+        try:
+            proxy._pyroBind()
+        except Exception:
+            return False
+        return True
 
 ## XXX: Global singleton
 deviceDepot = None
