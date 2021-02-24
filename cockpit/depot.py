@@ -166,10 +166,9 @@ class DeviceDepot:
                 uri=d.config.get('uri')
                 if uri:
                     start_time = time.time()
-                    print(uri)
                     while (not self.testConnection(uri)
                            and time.time() < start_time + STARTUP_TIMEOUT):
-                        time.sleep(5)
+                        time.sleep(1)
                     if not self.testConnection(uri):
                         raise RuntimeError("Failed to start the device server")
                     startupPause = False
