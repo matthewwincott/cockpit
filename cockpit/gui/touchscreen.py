@@ -103,7 +103,7 @@ class IconButton(wx.ToggleButton):
         self._do_layout()
 
     def _set_properties(self):
-        self.SetMinSize(wx.Size(self._cols * 48, self._rows * 48))
+        self.SetMinSize(wx.Size(self._cols * 56, self._rows * 56))
         image = wx.Image(os.path.join(cockpit.gui.IMAGES_PATH, self.icon))
         self.SetBitmap(image.ConvertToBitmap())
         if self.icon_pressed:
