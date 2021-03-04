@@ -18,6 +18,49 @@
 ## You should have received a copy of the GNU General Public License
 ## along with Cockpit.  If not, see <http://www.gnu.org/licenses/>.
 
+"""This package contains all the UI for Cockpit.
+
+All of the widgets that are not created by specific devices live here
+--- the mosaic, macro stage view, camera window, etc.  The different
+GUI windows and widgets automatically adjust themselves based on the
+number and capabilities of the hardware available.
+
+Some of subpackages are:
+
+* :mod:`cockpit.gui.camera`: all code related to the camera views
+  window.
+
+* :mod:`cockpit.gui.dialogs`: contains all dialog subclasses and any
+  widgets that are specific to them.  This includes the experiment
+  setup dialogs.
+
+* :mod:`cockpit.gui.imageViewer`: generic code for displaying pixel
+  arrays to the screen.
+
+* :mod:`cockpit.gui.macroStage`: all code related to the macro stage
+  view and experiment histogram.
+
+* :mod:`cockpit.gui.mosaic`: all code related to the mosaic viewer.
+
+And some of its modules are:
+
+* :mod:`cockpit.gui.fileViewerWindow`: displays MRC files; this code
+  is invoked when an MRC file is dragged onto the main window.
+
+* :mod:`cockpit.gui.guiUtils`: utility functions for setting up and
+  running the UI.
+
+* :mod:`cockpit.gui.keyboard`: binds keyboard shortcuts to windows.
+
+* :mod:`cockpit.gui.loggingWindow`: displays standard output and
+  standard error.
+
+* :mod:`cockpit.gui.mainWindow`: shows exposure settings, the
+  run-experiment buttons, and any custom UI created by device code.
+
+"""
+
+
 import sys
 import traceback
 

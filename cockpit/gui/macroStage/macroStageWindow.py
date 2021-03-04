@@ -51,6 +51,23 @@
 ## ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 ## POSSIBILITY OF SUCH DAMAGE.
 
+"""
+The Macro Stage window gives the user a high-level overview of where
+they are with respect to the motion limits of their stage.
+
+macroStageBase: A base class for the XY and Z stage displays; includes code
+  for text display, scaling, and the like.
+
+macroStageWindow: The window UI code, including the buttons along the
+  bottom.
+
+macroStageXY: Displays the XY stage position.
+
+macroStageZ: Displays the Z stage position, including a histogram of
+  past experiment altitudes.
+
+"""
+
 import typing
 
 import wx

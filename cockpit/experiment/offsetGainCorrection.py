@@ -49,6 +49,10 @@
 ## ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 ## POSSIBILITY OF SUCH DAMAGE.
 
+"""Generates offset/gain correction files (which add an offset to
+pixel values and then multiply them by a gain factor).
+
+"""
 
 from cockpit.experiment import actionTable
 import decimal
