@@ -409,7 +409,13 @@ class WindowsMenu(wx.Menu):
             return
 
         main_window = wx.GetApp().GetTopWindow()
-        all_windows = {w for w in wx.GetTopLevelWindows() if w is not main_window}
+        if sys.platform == 'darwin':
+            #on mac's you can loose the mian window, other system this menu
+            #is in the mina window so not needed. 
+            all_windows = {w for w in wx.GetTopLevelWindows()}
+        else:
+            all_windows = {w for w in wx.GetTopLevelWindows()
+                           if w is not main_window}
 
         for window in all_windows.difference(self._id_to_window.values()):
             if not window.Title:
