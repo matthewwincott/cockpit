@@ -67,6 +67,13 @@ class ZStackExperiment(experiment.Experiment):
     # each Z-slice in turn, take an image, then move to the next.
     def generateActions(self):
         multichannel=True
+        if multichannel:
+            maxExp=0
+            for cameras, lightTimePairs in self.exposureSettings:
+                for light,time in lightTimePairs:
+                    maxExp=max(maxExp,time)
+            print(maxExp)
+            
         table = actionTable.ActionTable()
         curTime = 0
         prevAltitude = None
@@ -93,7 +100,13 @@ class ZStackExperiment(experiment.Experiment):
                     #generate a number of triggers and camera exposures.
                     #for multi channel on one camera
                     for lightTimePair in lightTimePairs:
-                        curTime = self.expose(curTime, cameras, [lightTimePair], table)
+                        endLight = self.expose(curTime,
+                                                  cameras,
+                                                  [lightTimePair],
+                                                  table)
+                        curTime =  max(curTime+maxExp, endLight)
+                        #curTime =  max(0,
+                         #   self.getTimeWhenCameraCanExpose(table, cameras))
                         curTime += decimal.Decimal('1e-10')
 
                 else:
