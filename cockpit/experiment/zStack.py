@@ -66,13 +66,12 @@ class ZStackExperiment(experiment.Experiment):
     ## Create the ActionTable needed to run the experiment. We simply move to 
     # each Z-slice in turn, take an image, then move to the next.
     def generateActions(self):
-        multichannel=True
+        multichannel=self.interleave
         if multichannel:
             maxExp=0
             for cameras, lightTimePairs in self.exposureSettings:
                 for light,time in lightTimePairs:
                     maxExp=max(maxExp,time)
-            print(maxExp)
             
         table = actionTable.ActionTable()
         curTime = 0
@@ -105,12 +104,14 @@ class ZStackExperiment(experiment.Experiment):
                                                   [lightTimePair],
                                                   table)
                         curTime =  max(curTime+maxExp, endLight)
+                        curTime = max(curTime,
+                            self.getTimeWhenCameraCanExpose(table, cameras[0]))
                         #curTime =  max(0,
                          #   self.getTimeWhenCameraCanExpose(table, cameras))
                         curTime += decimal.Decimal('1e-10')
 
                 else:
-                    curTime = self.expose(curTime, cameras, lightTimePair, table)
+                    curTime = self.expose(curTime, cameras, lightTimePairs, table)
                     # Advance the time very slightly so that all exposures
                     # are strictly ordered.
                     curTime += decimal.Decimal('1e-10')

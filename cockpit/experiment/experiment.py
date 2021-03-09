@@ -116,7 +116,7 @@ class Experiment:
     def __init__(self, numReps, repDuration,
             zPositioner, altBottom, zHeight, sliceHeight,
             exposureSettings, otherHandlers = [],
-            metadata = '', savePath = ''):
+                 metadata = '', savePath = '', interleave = False):
         self.numReps = numReps
         self.repDuration = repDuration
         self.zPositioner = zPositioner
@@ -134,6 +134,7 @@ class Experiment:
         self.otherHandlers = list(otherHandlers)
         self.metadata = metadata
         self.savePath = savePath
+        self.interleave = interleave
 
         self._run_thread = None
 

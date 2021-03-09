@@ -186,6 +186,11 @@ class ExperimentConfigPanel(wx.Panel):
         self.shouldExposeSimultaneously = wx.CheckBox(
                 self, label = "Expose all cameras simultaneously")
         exposureSizer.Add(self.shouldExposeSimultaneously, 0, wx.ALL, border=5)
+
+        self.interleaveMultiChannel = wx.CheckBox(
+                self, label = "Interleave all channels on one Camera.")
+        exposureSizer.Add(self.interleaveMultiChannel, 0, wx.ALL, border=5)
+        
         ## Panel for holding controls for when we expose every camera
         # simultaneously.
         self.simultaneousExposurePanel = wx.Panel(self, name="simultaneous exposures")
@@ -246,7 +251,9 @@ class ExperimentConfigPanel(wx.Panel):
         self.shouldExposeSimultaneously.Bind(wx.EVT_CHECKBOX, self.onExposureCheckbox)
         self.shouldExposeSimultaneously.SetValue(self.settings['shouldExposeSimultaneously'])
         self.onExposureCheckbox()
-
+        #toggle interleaved multichannel. 
+        self.interleaveMultiChannel.SetValue(self.settings['interleave'])
+        
         self.filepath_panel = FilepathPanel(self)
         self.filepath_panel.SetTemplate(self.settings['filenameTemplate'])
         self.filepath_panel.UpdateFilename()
@@ -280,6 +287,7 @@ class ExperimentConfigPanel(wx.Panel):
                 'sliceHeight': '.15',
                 'stackHeight': '4',
                 'ZPositionMode': 0,
+                'interleave': False
             }
         )
         # FIXME: cockpit.util.userConfig.getValue(...default={...})
@@ -480,7 +488,8 @@ class ExperimentConfigPanel(wx.Panel):
                 'zHeight': zHeight,
                 'sliceHeight': sliceHeight,
                 'exposureSettings': exposureSettings,
-                'savePath': savePath
+                'savePath': savePath,
+                'interleave': self.interleaveMultiChannel.GetValue()
         }
         experimentType = self.experimentType.GetStringSelection()
         module = self.experimentStringToModule[experimentType]
@@ -509,6 +518,7 @@ class ExperimentConfigPanel(wx.Panel):
                 'sliceHeight': self.sliceHeight.GetValue(),
                 'stackHeight': self.stackHeight.GetValue(),
                 'ZPositionMode': self.zPositionMode.GetSelection(),
+                'interleave': self.interleaveMultiChannel.GetValue()
         }
         return newSettings
 
