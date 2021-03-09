@@ -65,6 +65,7 @@ class ZStackExperiment(experiment.Experiment):
     ## Create the ActionTable needed to run the experiment. We simply move to 
     # each Z-slice in turn, take an image, then move to the next.
     def generateActions(self):
+        multichannel=True
         table = actionTable.ActionTable()
         curTime = 0
         prevAltitude = None
@@ -87,10 +88,18 @@ class ZStackExperiment(experiment.Experiment):
 
             # Image the sample.
             for cameras, lightTimePairs in self.exposureSettings:
-                curTime = self.expose(curTime, cameras, lightTimePairs, table)
-                # Advance the time very slightly so that all exposures
-                # are strictly ordered.
-                curTime += decimal.Decimal('1e-10')
+                if len(lightTimePairs) > 1 and multichannel:
+                    #generate a number of triggers and camera exposures.
+                    #for multi channel on one camera
+                    for lightTimePair in lightTimePairs:
+                        curTime = self.expose(curTime, cameras, [lightTimePair], table)
+                        curTime += decimal.Decimal('1e-10')
+
+                else:
+                    curTime = self.expose(curTime, cameras, lightTimePair, table)
+                    # Advance the time very slightly so that all exposures
+                    # are strictly ordered.
+                    curTime += decimal.Decimal('1e-10')
             # Hold the Z motion flat during the exposure.
             table.addAction(curTime, self.zPositioner, zTarget)
 
