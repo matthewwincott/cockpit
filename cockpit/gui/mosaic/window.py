@@ -59,6 +59,7 @@ import numpy
 import scipy.ndimage.measurements
 import wx
 from OpenGL.GL import *
+import time
 
 import cockpit.gui
 import cockpit.gui.camera.window
@@ -727,6 +728,11 @@ class MosaicWindow(wx.Frame, MosaicCommon):
             # have changed.
             try:
                 minVal, maxVal = cockpit.gui.camera.window.getCameraScaling(camera)
+                if (minVal == 0) and (maxVal == 1):
+                    #no image already grabbed so wait and regrab
+                    #min/max once they have been set
+                    time.sleep(0.1)
+                    minVal, maxVal = cockpit.gui.camera.window.getCameraScaling(camera)                  
             except Exception as e:
                 # Go to idle state.
                 self.shouldContinue.clear()
