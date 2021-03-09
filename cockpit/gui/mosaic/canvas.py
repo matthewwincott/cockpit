@@ -386,6 +386,10 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
             glFlush()
             self.SwapBuffers()
         except Exception as e:
+            wx.MessageBox(
+                    "Mosaic OpenGL exception. ", 
+                    caption='Error %s' % e
+                )
             print ("Error rendering the canvas:",e)
             traceback.print_exc()
             self.renderError = e
