@@ -54,6 +54,7 @@ from cockpit import depot
 from cockpit.handlers import deviceHandler
 from cockpit import events
 import time
+import wx
 
 
 ## This handler is for stage positioner devices.
@@ -98,9 +99,15 @@ class PositionerHandler(deviceHandler.DeviceHandler):
         if self.softLimits[0] <= pos <= self.softLimits[1]:
             self.callbacks['moveAbsolute'](self.axis, pos)
         else:
+            wx.MessageBox(
+                    "Tried to move outside of stage limits.", 
+                    caption='Stage %s error' % self.name
+                )
             raise RuntimeError("Tried to move %s " % (self.name) +
                     "outside soft motion limits (target %.2f, limits [%.2f, %.2f])" %
                     (pos, self.softLimits[0], self.softLimits[1]))
+            
+        
 
 
     ## Handle being told to move by a specific delta.
@@ -109,6 +116,10 @@ class PositionerHandler(deviceHandler.DeviceHandler):
         if self.softLimits[0] <= target <= self.softLimits[1]:
             self.callbacks['moveRelative'](self.axis, delta)
         else:
+            wx.MessageBox(
+                    "Tried to move outside of stage limits.", 
+                    caption='Stage %s error' % self.name
+                )
             raise RuntimeError("Tried to move %s " % (self.name) +
                     "outside soft motion limits (target %.2f, limits [%.2f, %.2f])" %
                     (target, self.softLimits[0], self.softLimits[1]))
