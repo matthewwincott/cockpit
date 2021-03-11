@@ -235,8 +235,8 @@ def makeLightsControls(parent, labels, defaults):
 
 
 ## Show an informative dialog
-def showHelpDialog(parent, text):
-    wx.MessageDialog(parent, text,
+def showHelpDialog(parent, text,title = None):
+    wx.MessageDialog(parent, text, title,
             style = wx.ICON_INFORMATION | wx.OK).ShowModal()
 
 
