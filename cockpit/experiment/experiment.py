@@ -202,6 +202,12 @@ class Experiment:
                     "Are you sure you want to overwrite it?"):
                 return False
 
+        if self.interleave and (len(self.cameras) != 1) :
+            guiUtils.showHelpDialog(None,
+                                "Interleaving images only works on one camera",
+                                "Warning")
+            return False
+        
         global lastExperiment
         lastExperiment = self
         self.sanityCheckEnvironment()
