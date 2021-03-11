@@ -127,9 +127,9 @@ class GetManyNumbersDialog(wx.Dialog):
 
         buttonsBox = wx.BoxSizer(wx.HORIZONTAL)
 
-        #cancelButton = wx.Button(self, wx.ID_CANCEL, "Cancel")
-        #cancelButton.SetToolTip(wx.ToolTip("Close this window"))
-        #buttonsBox.Add(cancelButton, 0, wx.ALL, 5)
+        cancelButton = wx.Button(self, wx.ID_CANCEL, "Cancel")
+        cancelButton.SetToolTip(wx.ToolTip("Close this window"))
+        buttonsBox.Add(cancelButton, 0, wx.ALL, 5)
         
         startButton = wx.Button(self, wx.ID_OK, "Okay")
         buttonsBox.Add(startButton, 0, wx.ALL, 5)
