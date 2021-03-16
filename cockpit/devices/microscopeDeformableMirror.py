@@ -171,9 +171,7 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
         checkedArray=[False]*len(self.menuItems.keys())
         metric=self.proxy.get_metric()
         for i,selection in enumerate(self.menuItems.keys()):
-#            print (selection,metric)
             if (self.menuItems[selection] == metric):
-                print(metric)
                 checkedArray[i]=True
         menu = cockpit.gui.device.Menu(self.menuItems.keys(),
                                        self.menuCallback,checkedArray)

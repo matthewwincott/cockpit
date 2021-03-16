@@ -173,8 +173,10 @@ class MultilineDisplay(wx.StaticText):
 
 
 class Menu(wx.Menu):
-    def __init__(self, menuItems, menuCallback,checkedArray = None):
-        """Initialise a menu of menuItems that are handled by menuCallback."""
+    def __init__(self, menuItems, menuCallback, checkedArray = None):
+        """Initialise a menu of menuItems that are handled by menuCallback.
+           optional checkArray is a boolean array of checked items in the
+           same order as the menuItems"""
         super().__init__()
         if (checkedArray == None):
             checkedArray = [False]*len(menuItems)
