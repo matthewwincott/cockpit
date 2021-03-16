@@ -173,12 +173,17 @@ class MultilineDisplay(wx.StaticText):
 
 
 class Menu(wx.Menu):
-    def __init__(self, menuItems, menuCallback):
+    def __init__(self, menuItems, menuCallback,checkedArray = None):
         """Initialise a menu of menuItems that are handled by menuCallback."""
         super().__init__()
+        if (checkedArray == None):
+            checkedArray = [False]*len(menuItems)
         for i, item in enumerate(menuItems):
             if len(item):
-                self.Append(i+1, item, '')
+                if checkedArray[i]:
+                    self.AppendCheckItem(i+1, item, '').Check()
+                else:
+                    self.Append(i+1, item, '')
                 self.Bind(wx.EVT_MENU,  lambda event, index=i, item=item:menuCallback(index, item), id= i+1)
             else:
                 self.AppendSeparator()

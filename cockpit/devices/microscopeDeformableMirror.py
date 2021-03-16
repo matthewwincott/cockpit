@@ -168,7 +168,15 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
 
 
     def onRightMouse(self, event):
-        menu = cockpit.gui.device.Menu(self.menuItems.keys(), self.menuCallback)
+        checkedArray=[False]*len(self.menuItems.keys())
+        metric=self.proxy.get_metric()
+        for i,selection in enumerate(self.menuItems.keys()):
+#            print (selection,metric)
+            if (self.menuItems[selection] == metric):
+                print(metric)
+                checkedArray[i]=True
+        menu = cockpit.gui.device.Menu(self.menuItems.keys(),
+                                       self.menuCallback,checkedArray)
         menu.show(event)
 
     def takeImage(self):
