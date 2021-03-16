@@ -113,10 +113,10 @@ class ROISelect(wx.Frame):
                 else:
                     # closer to edge
                     self._dragging = 'r'
-            elif self._dragging is 'r':
+            elif self._dragging == 'r':
                 # Drag circle radius
                 self.moveCircle((x, y), drag_r)
-            elif self._dragging is 'xy':
+            elif self._dragging == 'xy':
                 # Drag circle centre
                 self.moveCircle(pos, r)
 
