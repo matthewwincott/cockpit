@@ -484,6 +484,7 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
                 resize_dim = int(np.round(original_dim / resize_dim))
 
             scale_factor = original_dim / resize_dim
+
             temp = self.bin_ndarray(image_raw, new_shape=(resize_dim, resize_dim), operation='mean')
             self.createCanvas(temp, scale_factor)
         else:
@@ -491,8 +492,12 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
 
     def createCanvas(self, temp, scale_factor):
         app = wx.App()
+        last_roi=Config.getValue('dm_circleParams')
+        # For some reason the stored values are flipped x-y
+        last_roi=(last_roi[1],last_roi[0],last_roi[2])
         temp = np.require(temp, requirements='C')
-        frame = selectCircle.ROISelect(input_image=temp, scale_factor=scale_factor)
+        frame = selectCircle.ROISelect(input_image=temp,
+                                       scale_factor=scale_factor, roi = last_roi)
         app.MainLoop()
 
     def onCalibrate(self):
