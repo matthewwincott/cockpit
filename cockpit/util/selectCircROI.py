@@ -33,7 +33,7 @@ def normalise(array, scaling = 1):
     return norm_array
 
 class ROISelect(wx.Frame):
-    def __init__(self, input_image, scale_factor = 1):
+    def __init__(self, input_image, scale_factor = 1,roi = (256,256,128)):
         wx.Frame.__init__(self, None, -1, 'ROI selector')
         image_norm = normalise(input_image,scaling=255)
         image_norm_rgb = np.stack((image_norm,)*3,axis=-1)
@@ -47,13 +47,15 @@ class ROISelect(wx.Frame):
         self.canvas = FloatCanvas(self, size=self.img.GetSize())
         self.canvas.Bind(wx.EVT_MOUSE_EVENTS, self.onMouse)
         self.bitmap = self.canvas.AddBitmap(self.img, (0,0), Position='cc')
-        self.circle = self.canvas.AddCircle((0,0), 128, LineColor='cyan', LineWidth=2)
+        circle=self.roiToCircle(roi)
+        self.circle = self.canvas.AddCircle((circle[0],circle[1]), circle[2], LineColor='cyan', LineWidth=2)
         self.Sizer.Add(self.canvas)
         # Save button
         saveBtn = wx.Button(self, label='Save ROI')
         saveBtn.Bind(wx.EVT_BUTTON, lambda evt, sf=scale_factor: self.onSave(event=evt, sf=sf))
         self.Sizer.Add(saveBtn)
         self.Fit()
+        self.Show()
 
     @property
     def roi(self):
@@ -61,6 +63,12 @@ class ROISelect(wx.Frame):
         roi_x, roi_y = self.canvas.WorldToPixel(self.circle.XY)
         roi_r = max(self.circle.WH)
         return (roi_x, roi_y, roi_r)
+
+    def roiToCircle(self,roi):
+        """Convert roi  parameters to circle"""
+        circ_x, circ_y = self.canvas.PixelToWorld(roi[:2])
+        circ_d = roi[2]*2
+        return (circ_x, circ_y, circ_d)
 
     def onSave(self, event, sf):
         roi_unscaled = np.asarray(self.roi)
@@ -105,10 +113,10 @@ class ROISelect(wx.Frame):
                 else:
                     # closer to edge
                     self._dragging = 'r'
-            elif self._dragging is 'r':
+            elif self._dragging == 'r':
                 # Drag circle radius
                 self.moveCircle((x, y), drag_r)
-            elif self._dragging is 'xy':
+            elif self._dragging == 'xy':
                 # Drag circle centre
                 self.moveCircle(pos, r)
 

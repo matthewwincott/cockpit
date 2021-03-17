@@ -270,8 +270,16 @@ class MicroscopeAOCompositeDevice(device.Device):
             print("Detecting nothing but background noise")
 
     def createCanvas(self, temp, scale_factor):
+        last_roi=Config.getValue('dm_circleParams')
+        # For some reason the stored values are flipped x-y
+        last_roi=(last_roi[1]/scale_factor,
+                  last_roi[0]/scale_factor,
+                  last_roi[2]/scale_factor)
         temp = np.require(temp, requirements='C')
-        frame = selectCircle.ROISelect(input_image=temp, scale_factor=scale_factor)
+        print(last_roi)
+        frame = selectCircle.ROISelect(input_image=temp,
+                                       scale_factor=scale_factor,
+                                       roi = last_roi)
         frame.Show()
 
     def onCalibrate(self):
