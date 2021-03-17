@@ -94,10 +94,12 @@ class IntensityProfiler:
                 self.setHalfWidth(min(nx/10, ny/10))
             halfWidth = self.getHalfWidth()
             peakx, peaky = self._beadCentre
+            peakx = int(peakx)
+            peaky = int(peaky)
             # Use a the fifth of the data around the bead, or to edge of dataset.
             dataSubset = self._data[:,
-                              max(0, peaky-halfWidth):min(ny, peaky+halfWidth),
-                              max(0, peakx-halfWidth):min(nx, peakx+halfWidth)]
+                              max(0, int(peaky-halfWidth)):min(int(ny), int(peaky+halfWidth)),
+                              max(0, int(peakx-halfWidth)):min(int(nx), int(peakx+halfWidth))]
             # Estimate background from image corners.
             bkg = np.min([np.mean(self._data[:,:nx//10,:ny//10]),
                           np.mean(self._data[:,:-nx//10,:ny//10]),
