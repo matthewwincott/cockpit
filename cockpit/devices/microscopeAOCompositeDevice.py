@@ -26,6 +26,8 @@ import cockpit.util.phaseViewer as phaseViewer
 import cockpit.util.charAssayViewer as charAssayViewer
 import numpy as np
 import aotools
+from microscope import TriggerType
+from microscope import TriggerMode
 
 
 class MicroscopeAOCompositeDevice(device.Device):
@@ -41,7 +43,7 @@ class MicroscopeAOCompositeDevice(device.Device):
 
     def initialize(self):
         self.proxy = Pyro4.Proxy(self.uri)
-        self.proxy.set_trigger(cp_ttype="FALLING_EDGE", cp_tmode="ONCE")
+        self.proxy.set_trigger(ttype=TriggerType.SOFTWARE, tmode=TriggerMode.ONCE)
         self.no_actuators = self.proxy.get_n_actuators()
         self.config_dir = wx.GetApp().Config['global'].get('config-dir')
 
