@@ -106,7 +106,7 @@ class MicroscopeAOCompositeDevice(device.Device):
     def set_sys_flat_param(self):
         inputs = cockpit.gui.dialogs.getNumberDialog.getManyNumbersFromUser(
                 None,
-                'Set the parameters for Sensorless Adaptive Optics routine',
+                'Set system flat parameters',
                 ['Number of iterations',
                  'Error threshold',
                  'System Flat Noll indeces'],
@@ -124,7 +124,7 @@ class MicroscopeAOCompositeDevice(device.Device):
     def set_sensorless_param(self):
         inputs = cockpit.gui.dialogs.getNumberDialog.getManyNumbersFromUser(
                 None,
-                'Set the parameters for Sensorless Adaptive Optics routine',
+                'Set sensorless AO parameters',
                 ['Aberration range minima',
                  'Aberration range maxima',
                  'Number of measurements',
