@@ -475,6 +475,7 @@ class MicroscopeAOCompositeDevice(device.Device):
             self.sys_flat_values = np.asarray(Config.getValue('dm_sys_flat'))
 
         self.proxy.send(self.sys_flat_values)
+        self.proxy.set_system_flat(self.sys_flat_values)
 
     def onApplyLastPattern(self):
         last_ac = self.proxy.get_last_actuator_values()
@@ -674,4 +675,5 @@ class MicroscopeAOCompositeDevice(device.Device):
 
             print("Actuator positions applied: ", self.actuator_offset)
             self.proxy.send(self.actuator_offset)
+            self.last_sensorless = np.ndarray.copy(self.actuator_offset)
             wx.CallAfter(self.takeImage)
