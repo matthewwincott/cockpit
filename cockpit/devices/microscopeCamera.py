@@ -228,7 +228,7 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
         if isExact:
             return decimal.Decimal(t) * (decimal.Decimal(1000.0))
         else:
-            return t * 1000.0
+            return t * 1000.0 
 
 
     def getImageSize(self, name):

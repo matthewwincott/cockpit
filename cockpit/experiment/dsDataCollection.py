@@ -4,7 +4,7 @@
 from cockpit import depot
 from cockpit import events
 from cockpit.experiment import immediateMode
-
+import cockpit.util.threads
 import cockpit.interfaces.imager as imager
 import cockpit.interfaces.stageMover
 
@@ -14,6 +14,9 @@ import os
 import time
 import numpy as np
 import imageio
+
+import cockpit.util.userConfig as Config
+
 
 ## Provided so the UI knows what to call this experiment.
 EXPERIMENT_NAME = "BiasImageDatasetExperiment"
@@ -32,7 +35,7 @@ class BiasImageDatasetExperiment(immediateMode.ImmediateModeExperiment):
         bias_modes=(4, 5, 6, 7, 10),
         abb_magnitude=5,
         applied_modes=(4, 5, 6, 7, 10),
-        applied_step=5,
+        applied_step=50,
         numReps=1,
         initial_abb=None,
         repDuration=4,
@@ -54,7 +57,7 @@ class BiasImageDatasetExperiment(immediateMode.ImmediateModeExperiment):
         except:
             self.saveBasePath = os.path.join(os.path.expanduser("~"), saveprefix)
 
-        self.numReps = len(applied_steps) * areas
+        self.numReps = len(applied_steps)* len(applied_modes) * areas
 
         # Set savepath to '' to prevent saving images. We will save our own images,
         # because setting filenames using Experiment/DataSaver look like it is
@@ -71,34 +74,38 @@ class BiasImageDatasetExperiment(immediateMode.ImmediateModeExperiment):
     def is_running(self):
         # HACK: Imager won't collect images if an experiment is running... Catch 22 here... So just breaking this for now
         return False
-
+    #@cockpit.util.threads.callInMainThread
     def executeRep(self, repNum):
-        print(f"Started rep {repNum+1}/{self.numReps} Time Elapsed: {time.time()-self.time_start:.1f}")
+        t_elapsed=time.time()-self.time_start
+        print(f"Started rep {repNum+1}/{self.numReps} Time Elapsed: {t_elapsed:.1f}s Time Remaining: {(numReps-repNum)*t_elapsed/repNum/60:.1f} min")
         # Assume correct camera already active
         activeCams = depot.getActiveCameras()
         camera = activeCams[0]
 
         aodev = depot.getDeviceWithName("ao")  # IS THIS THE CORRECT DEVICE NAME?
-        """
+
         try:
-            offset = aodev.proxy.get_system_flat()  # assumes the correction for flat has already been done.
+            #offset = aodev.proxy.get_system_flat()  # assumes the correction for flat has already been done.
+            #offset = Config.getValue('dm_sys_flat'
+            offset = np.copy(aodev.actuator_offset)
         except:
             print("Failed to Get system flat")
             offset = None
-        """
 
 
         biaslist, fprefix, newarea = self.abb_generator.__next__()
+
         imlist = []
         dm_set_failure = False
 
         for abb in biaslist:
             try:
-                aodev.proxy.set_phase(abb)#, )offset)
+                aodev.proxy.set_phase(abb, offset)
             except:
                 dm_set_failure = True
 
             # Do we need a pause here?
+            #time.sleep(1)
             # Collect image
             # takeimage = wx.GetApp().Imager.takeImage # this allows for blocking
             takeimage = depot.getHandlerWithName("dsp imager").takeImage
@@ -106,7 +113,7 @@ class BiasImageDatasetExperiment(immediateMode.ImmediateModeExperiment):
                 events.NEW_IMAGE % camera.name,
                 takeimage,
                 camera.getExposureTime() / 1000 + CAMERA_TIMEOUT,
-                # shouldBlock=True,
+                #shouldBlock=True,
             )
             if result is not None:
                 imlist.append(result[0])
@@ -125,7 +132,10 @@ class BiasImageDatasetExperiment(immediateMode.ImmediateModeExperiment):
 
         # Move to a new XY position if completed scan through all applied steps.
         if newarea:
+            print("Moving to new Area")
             cockpit.interfaces.stageMover.goToXY((curX + 50, curY - 50), shouldBlock=True)
+        # reset phase
+        aodev.proxy.set_phase([0], offset)
 
         if self.numReps == repNum + 1:
             print("-----Experiment Complete-----")
@@ -158,14 +168,16 @@ class BiasImageDatasetExperiment(immediateMode.ImmediateModeExperiment):
         start_aberrations = np.zeros(np.max((np.max(bias_modes), (np.max(applied_modes)))) + 1)
         newarea = False
         for area in range(areas):
+            if area:
+                newarea = True
+
             for applied_abb in applied_modes:
                 for step in applied_steps:
                     start_aberrations[applied_abb] = step
                     biaslist = self.makeBiasPolytope(start_aberrations, bias_modes, len(start_aberrations))
-                    fprefix = f"A{area}A{applied_abb}S{step:.1f}_"
+                    fprefix = f"R{areas}A{area}A{applied_abb}S{step:.1f}_"
                     yield biaslist, fprefix, newarea
                     newarea = False
-            newarea = True
 
 
 EXPERIMENT_CLASS = BiasImageDatasetExperiment  # Don't know what the point of this is but is required by GUI

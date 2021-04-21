@@ -121,6 +121,9 @@ class MicroscopeAOCompositeDevice(device.Device):
         else:
             self.sysFlatNollZernike = np.asarray([int(z_ind) for z_ind in inputs[-1][1:-1].split(', ')])
 
+    def exercise(self,iter=3000,interval=0.1):
+        self.proxy.exercise_ao(iter,interval)
+			
     def set_sensorless_param(self):
         inputs = cockpit.gui.dialogs.getNumberDialog.getManyNumbersFromUser(
                 None,
@@ -191,7 +194,12 @@ class MicroscopeAOCompositeDevice(device.Device):
         sysFlatCalcButton = wx.Button(self.panel, label='Calculate System Flat')
         sysFlatCalcButton.Bind(wx.EVT_BUTTON, lambda evt: self.onSysFlatCalc())
         self.elements['sysFlatCalcButton'] = sysFlatCalcButton
+        
+        exerciseAOButton = wx.Button(self.panel, label='Exercise AO')
+        exerciseAOButton.Bind(wx.EVT_BUTTON, lambda evt: self.exercise())
+        self.elements['exerciseAOButton'] = exerciseAOButton
 
+		
         label_use = cockpit.gui.device.Label(
             parent=self.panel, label='AO use')
         self.elements['label_use'] = label_use
