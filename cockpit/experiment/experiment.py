@@ -605,6 +605,7 @@ class Experiment:
                 raise Exception ('%s has no trigger mode set.' % camera)
             self.cameraToImageCount[camera] += 1
         for camera in self.cameras:
+            print (camera)
             if (camera not in usedCams and
                 camera.getExposureMode() == cockpit.handlers.camera.TRIGGER_AFTER):
                 # Camera is a continuous-exposure/frame-transfer camera
