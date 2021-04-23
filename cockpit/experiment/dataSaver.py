@@ -88,12 +88,13 @@ class DataSaver:
     # \param cameraToExcitation Maps camera handlers to the excitation
     #        wavelength used to generate the images it will acquire.
     def __init__(self, cameras, numReps, cameraToImagesPerRep,
-                 cameraToIgnoredImageIndices, runThread, savePath, pixelSizeZ,
-                 titles, cameraToExcitation):
+                 cameraToIgnoredImageIndices, interleave, runThread, savePath, pixelSizeZ,
+                 titles, cameraToExcitation, emissionList):
         self.cameras = cameras
         self.numReps = numReps
         self.cameraToImagesPerRep = cameraToImagesPerRep
         self.cameraToIgnoredImageIndices = cameraToIgnoredImageIndices
+        self.interleave = interleave
         self.runThread = runThread
 
         ## We want to write the excitation wavelength for each image
@@ -103,6 +104,10 @@ class DataSaver:
         ## camera will have the same light source.  This is a
         ## limitation of the cockpit interface.
         self.cameraToExcitation = cameraToExcitation
+
+        ## if we are interleaving the images onto a single camera then we
+        ## need to know the relevant emisison wavelengths. 
+        self.emissionList = emissionList
 
         ## Maximum size, in megabytes, of each file generated.  If the
         # experiment data exceeds this, then a new file will be opened, and
@@ -203,8 +208,13 @@ class DataSaver:
         pixelSizeXY = wx.GetApp().Objectives.GetPixelSize()
         lensID = wx.GetApp().Objectives.GetCurrent().lens_ID
         #wavelength should always be on camera even if "0"
-        wavelengths = [c.wavelength for c in self.cameras]
-
+        if not self.interleave:
+            #not multichannel on one camera
+            wavelengths = [c.wavelength for c in self.cameras]
+        else:
+            #multi-channel on one camera
+            wavelengths = emissionList
+                    
         ## Size of one plane's worth of metadata in the extended header.
         numIntegers = 8
         numFloats = 32
@@ -222,7 +232,7 @@ class DataSaver:
                 numTimepoints = self.numReps - (self.maxRepsPerFile
                                                 * (len(self.filehandles) - 1))
             header = cockpit.util.datadoc.makeHeaderForShape(
-                (len(self.cameras), numTimepoints, self.maxImagesPerRep,
+                (len(wavelengths), numTimepoints, self.maxImagesPerRep,
                     self.maxHeight, self.maxWidth),
                 numpy.uint16, pixelSizeXY, pixelSizeZ, wavelengths)
             #write the lensID to the header if not zero (meaning undefined)
@@ -423,7 +433,7 @@ class DataSaver:
         # image in the file.
         numImages = self.imagesKept[cameraIndex]
         timepoint = numImages // self.maxImagesPerRep
-        fileIndex = timepoint // self.maxRepsPerFile
+        fileIndex = int(timepoint // self.maxRepsPerFile)
         # Rebase the timepoint to be relative to the beginning of this specific
         # file.
         timepoint -= fileIndex * self.maxRepsPerFile
@@ -454,8 +464,12 @@ class DataSaver:
         imageMax = imageData.max()
 
         ex_wavelength = self.cameraToExcitation[camera]
-        em_wavelength = camera.wavelength
-
+        if not self.interleave:
+            em_wavelength = camera.wavelength
+        else:
+            em_wavelength = self.emissionList[
+                planeIndex % len(self.emissionList)]
+            
         with self.fileLocks[fileIndex]:
             handle = self.filehandles[fileIndex]
 
