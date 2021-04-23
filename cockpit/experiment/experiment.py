@@ -247,6 +247,7 @@ class Experiment:
         if self.savePath and max(self.cameraToImageCount.values()):
 
             cameraToExcitation = {c: 0.0 for c in self.cameras}
+            emissionList = []
             for cameras, lightTimePairs in self.exposureSettings:
                 ## If there's multiple light sources for the same
                 ## camera pick the one with highest wavelength.  Main
@@ -263,13 +264,20 @@ class Experiment:
                         continue
                     cameraToExcitation[camera] = max(cameraToExcitation[camera],
                                                      max_wavelength)
+                    if self.interleave:
+                        for light, time in lightTimePairs:
+                            emissionList.append(light.wavelength)
 
             saver = dataSaver.DataSaver(self.cameras, self.numReps,
                                         self.cameraToImageCount,
                                         self.cameraToIgnoredImageIndices,
-                                        self._run_thread, self.savePath,
-                                        self.sliceHeight, self.generateTitles(),
-                                        cameraToExcitation)
+                                        self.interleave,
+                                        self._run_thread,
+                                        self.savePath,
+                                        self.sliceHeight,
+                                        self.generateTitles(),
+                                        cameraToExcitation,
+                                        emissionList)
             saver.startCollecting()
             saveThread = threading.Thread(target=saver.executeAndSave,
                                           name="Experiment-execute-save")
