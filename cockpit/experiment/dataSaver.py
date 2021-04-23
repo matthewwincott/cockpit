@@ -213,7 +213,7 @@ class DataSaver:
             wavelengths = [c.wavelength for c in self.cameras]
         else:
             #multi-channel on one camera
-            wavelengths = emissionList
+            wavelengths = [e[1] for e in emissionList]
                     
         ## Size of one plane's worth of metadata in the extended header.
         numIntegers = 8
@@ -463,12 +463,14 @@ class DataSaver:
         imageMin = imageData.min()
         imageMax = imageData.max()
 
-        ex_wavelength = self.cameraToExcitation[camera]
         if not self.interleave:
+            ex_wavelength = self.cameraToExcitation[camera]
             em_wavelength = camera.wavelength
         else:
+            ex_wavelength = self.emissionList[
+                planeIndex % len(self.emissionList)][0]
             em_wavelength = self.emissionList[
-                planeIndex % len(self.emissionList)]
+                planeIndex % len(self.emissionList)][1]
             
         with self.fileLocks[fileIndex]:
             handle = self.filehandles[fileIndex]
