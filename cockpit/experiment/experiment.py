@@ -266,7 +266,7 @@ class Experiment:
                                                      max_wavelength)
                     if self.interleave:
                         for light, time in lightTimePairs:
-                            emissionList.append(light.wavelength)
+                            emissionList.append((light.wavelength,light.wavelength))
 
             saver = dataSaver.DataSaver(self.cameras, self.numReps,
                                         self.cameraToImageCount,
