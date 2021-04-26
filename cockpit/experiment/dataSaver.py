@@ -231,10 +231,18 @@ class DataSaver:
             if i == len(self.filehandles) - 1:
                 numTimepoints = self.numReps - (self.maxRepsPerFile
                                                 * (len(self.filehandles) - 1))
-            header = cockpit.util.datadoc.makeHeaderForShape(
-                (len(wavelengths), numTimepoints, self.maxImagesPerRep,
-                    self.maxHeight, self.maxWidth),
-                numpy.uint16, pixelSizeXY, pixelSizeZ, wavelengths)
+            if self.interleave:
+                header = cockpit.util.datadoc.makeHeaderForShape(
+                    (len(wavelengths), numTimepoints,
+                     (self.maxImagesPerRep/len(wavelengths)),
+                     self.maxHeight, self.maxWidth),
+                    numpy.uint16, pixelSizeXY, pixelSizeZ, wavelengths)
+            else:
+                header = cockpit.util.datadoc.makeHeaderForShape(
+                    (len(wavelengths), numTimepoints,self.maxImagesPerRep,
+                     self.maxHeight, self.maxWidth),
+                    numpy.uint16, pixelSizeXY, pixelSizeZ, wavelengths)
+            
             #write the lensID to the header if not zero (meaning undefined)
             if (lensID != 0):
                 header.LensNum = lensID
