@@ -66,7 +66,7 @@ import os
 import threading
 import time
 import wx
-
+import re
 
 ## Purely for debugging purposes, a copy of the last Experiment that was
 # executed.
@@ -168,7 +168,7 @@ class Experiment:
         self.cameraToIsReady = {c: True for c in self.cameras}
         ## Maps camera handlers to how many images we'll be taking with that
         # camera.
-        self.cameraToImageCount = {c: 0 for c in self.cameras}
+        self.cameraToImageCount = {c: int(0) for c in self.cameras}
         ## Maps camera handlers to indices of which images we will be ignoring
         # from them.
         self.cameraToIgnoredImageIndices = {c: set() for c in self.cameras}
@@ -264,8 +264,17 @@ class Experiment:
                     cameraToExcitation[camera] = max(cameraToExcitation[camera],
                                                      max_wavelength)
                     if self.interleave:
-                        for light, time in lightTimePairs:
-                            emissionList.append((light.wavelength,light.wavelength))
+                        emconfig= depot.getDeviceWithName(camera.name).config.get('em-map')
+                        if emconfig is not None:
+                            emdict=dict([re.split('\s*:\s*',f)
+                                         for f in re.split('\n',emconfig)])
+                            for light, time in lightTimePairs:
+                                emissionList.append((light.wavelength,
+                                        emdict[str(int(light.wavelength))]))
+                        else:
+                            for light, time in lightTimePairs:
+                                emissionList.append((light.wavelength,
+                                                     light.wavelength))
 
             saver = dataSaver.DataSaver(self.cameras, self.numReps,
                                         self.cameraToImageCount,
