@@ -187,6 +187,9 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
             trigline)
         # will be set with value from hardware later
         self.handlers = [result]
+        wavelength=self.config.get('wavelength',None)
+        if wavelength:
+            self.handlers[0].updateFilter('',wavelength)
         return [result]
 
 
