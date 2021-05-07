@@ -49,6 +49,7 @@
 ## ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 ## POSSIBILITY OF SUCH DAMAGE.
 
+"""Standard Z stack experiment."""
 
 from cockpit.experiment import actionTable
 from cockpit.experiment import experiment
@@ -73,15 +74,27 @@ class ZStackExperiment(experiment.Experiment):
             # Non-2D experiment; tack on an extra image to hit the top of
             # the volume.
             numZSlices += 1
+        if (self.zPositioner.digital):
+            #call the zPositioner to setup the digital Z stack.
+            stack=self.zPositioner.setupDigitalStack(self.zStart,self.sliceHeight,
+                                          numZSlices)
+           
         for zIndex in range(numZSlices):
             # Move to the next position, then wait for the stage to 
             # stabilize.
+            #find if this is a digital axis
             zTarget = self.zStart + self.sliceHeight * zIndex
             motionTime, stabilizationTime = 0, 0
             if prevAltitude is not None:
                 motionTime, stabilizationTime = self.zPositioner.getMovementTime(prevAltitude, zTarget)
-            curTime += motionTime
-            table.addAction(curTime, self.zPositioner, zTarget)
+                # digitial Z stack devices should add a pulse here and not
+                #an analogue voltage, but not on first loop
+                if(self.zPositioner.digital):
+                    table.addToggle(curTime, self.zPositioner)
+                    curTime += motionTime
+                else:
+                    curTime += motionTime
+                    table.addAction(curTime, self.zPositioner, zTarget)
             curTime += stabilizationTime
             prevAltitude = zTarget
 
@@ -92,13 +105,19 @@ class ZStackExperiment(experiment.Experiment):
                 # are strictly ordered.
                 curTime += decimal.Decimal('1e-10')
             # Hold the Z motion flat during the exposure.
-            table.addAction(curTime, self.zPositioner, zTarget)
+            # only needed in analouge signals
+            if(not self.zPositioner.digital):
+                table.addAction(curTime, self.zPositioner, zTarget)
 
         # Move back to the start so we're ready for the next rep.
         motionTime, stabilizationTime = self.zPositioner.getMovementTime(
                 self.zHeight, 0)
         curTime += motionTime
-        table.addAction(curTime, self.zPositioner, self.zStart)
+        
+        if(not self.zPositioner.digital):
+            # This works for analouge, the assumption is the remote does this
+            # in digital triggering
+            table.addAction(curTime, self.zPositioner, self.zStart)
         # Hold flat for the stabilization time, and any time needed for
         # the cameras to be ready. Only needed if we're doing multiple
         # reps, so we can proceed immediately to the next one.
@@ -108,8 +127,9 @@ class ZStackExperiment(experiment.Experiment):
                 for camera in cameras:
                     cameraReadyTime = max(cameraReadyTime,
                             self.getTimeWhenCameraCanExpose(table, camera))
-        table.addAction(max(curTime + stabilizationTime, cameraReadyTime),
-                self.zPositioner, self.zStart)
+        if(not self.zPositioner.digital):
+            table.addAction(max(curTime + stabilizationTime, cameraReadyTime),
+                            self.zPositioner, self.zStart)
 
         return table
 
