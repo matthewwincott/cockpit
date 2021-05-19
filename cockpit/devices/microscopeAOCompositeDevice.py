@@ -143,7 +143,7 @@ class MicroscopeAOCompositeDevice(device.Device):
         #returne to starting position
         zStage.moveAbsolute(startpos)
         #store calibartion on remote device
-        self.proxy.
+        self.remotezCal = zcal
         
                                 
         
