@@ -121,9 +121,32 @@ class MicroscopeAOCompositeDevice(device.Device):
         else:
             self.sysFlatNollZernike = np.asarray([int(z_ind) for z_ind in inputs[-1][1:-1].split(', ')])
 
-    def exercise(self,iter=3000,interval=0.1):
-        self.proxy.exercise_ao(iter,interval)
-			
+    def exercise(self,iterations=3000,interval=0.1):
+        self.proxy.exercise_ao(iterations,interval)
+
+    #function to calibrate the remote focus 
+    def calibrate_remote_z(zStage, limits = (-10,10), step = 2.0,
+                           zmodelist=[3,10]):
+        numsteps = 1+(limit[1]-limit[0])/step
+        #modes to utilise, be defualt defocus and 1st order spherical
+        z_modes=np.zeros(self.no_actuators)
+        for i in range(len(zmodelist)):
+            z_modes[zmodelist[i]] = 1
+        startpos=zStage.position()
+        zcal = np.zeros((self.no_accuators+1,numsteps))
+        zStage.moveRelative(limit[0])
+        for i in range (numsteps):
+            (position,zernikes)= self.proxy.flatten_phase(z_modes_ignore =
+                                                          z_modes)
+            zcal[i]=[(limit[0]+(i*step)) + zernikes]
+            zStage.moveRelative(step)
+        #returne to starting position
+        zStage.moveAbsolute(startpos)
+        #store calibartion on remote device
+        self.proxy.
+        
+                                
+        
     def set_sensorless_param(self):
         inputs = cockpit.gui.dialogs.getNumberDialog.getManyNumbersFromUser(
                 None,
