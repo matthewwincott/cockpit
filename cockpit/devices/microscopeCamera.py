@@ -19,10 +19,7 @@
 ## along with Cockpit.  If not, see <http://www.gnu.org/licenses/>.
 
 
-"""MicroscopeCamera device.
-
-  Supports cameras which implement the interface defined in
-  microscope.camera.Camera ."""
+"""Cameras from Python Microscope device server."""
 
 import decimal
 import Pyro4
@@ -71,6 +68,8 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
             self.modes = self.describe_setting('readout mode')['values']
         else:
             self.modes = []
+        if self.baseTransform:
+            self._setTransform(self.baseTransform)
 
     @property
     def _modenames(self):
@@ -216,7 +215,7 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
         asproxy._pyroAsync()
         result = asproxy.enable()
         result.wait(timeout=10)
-        self.enabled = result.value
+        self.enabled = self._proxy.get_is_enabled()
         if self.enabled:
             self.handlers[0].exposureMode = self._proxy.get_trigger_type()
             self.listener.connect()
