@@ -18,41 +18,23 @@
 ## You should have received a copy of the GNU General Public License
 ## along with Cockpit.  If not, see <http://www.gnu.org/licenses/>.
 
+"""Linkam stages."""
 
-"""pyLinkam
-
-Cockpit-side module for Linkam stages. Tested with CMS196.
-
-Config uses following parameters:
-  type:         LinkamStage
-  uri:          uri of pyLinkam remote
-  either
-    primitives:   list of _c_ircles and _r_ectangles to draw on MacroStageXY
-                    view, defining one per line as
-                        c x0 y0 radius
-                        r x0 y0 width height
-  or
-    xoffset:      x-offset of stage centre
-    yoffset:      y-offset of stage centre
-
-"""
 from cockpit import events
 import cockpit.gui.guiUtils
 import cockpit.gui.device
 from cockpit.devices.microscopeDevice import MicroscopeBase
-import cockpit.gui.toggleButton
 import cockpit.handlers.stagePositioner
 import Pyro4
-from . import stage
+from cockpit.devices.device import Device
 import threading
-import cockpit.util.logger as logger
 import cockpit.util.threads
 from cockpit.util import valueLogger
 
 import datetime
 import time
 import wx
-import re # to get regular expression parsing for config file
+
 
 DEFAULT_LIMITS = ((0, 0), (11000, 3000))
 LOGGING_PERIOD = 30
@@ -73,8 +55,6 @@ class RefillTimerPanel(wx.Panel):
                                       style=wx.ST_NO_AUTORESIZE)
         self.current = wx.StaticText(self, wx.ID_ANY, label=self.format(None),
                                      style= wx.ST_NO_AUTORESIZE)
-        font = wx.SystemSettings.GetFont(wx.SYS_OEM_FIXED_FONT)
-        [o.SetFont(font) for o in (self.filling, self.previous, self.current)]
         [self.Sizer.Add(o, flag=wx.ALL | wx.EXPAND, border=2) \
            for o in (label, self.previous, self.current, self.filling)]
         self.Bind(wx.EVT_CONTEXT_MENU, self.onContextMenu)
@@ -142,16 +122,23 @@ class RefillTimerPanel(wx.Panel):
             self.Refresh()
 
 
-class LinkamStage(MicroscopeBase, stage.StageDevice):
+class LinkamStage(MicroscopeBase, Device):
+    """Cockpit-side module for Linkam stages.
+
+    Tested with CMS196.  Config uses following parameters:
+
+    ``type``
+        Needs to be ``cockpit.devices.linkamStage.LinkamStage``.
+    ``uri``
+        URI of device server.
+
+    """
+
     _temperature_names = ('bridge', 'dewar', 'chamber', 'base')
     _refill_names = ('sample', 'external')
-    _config_types = {
-        'xoffset': float, # stage centre X offset
-        'yoffset': float, # stage centre Y offset
-    }
 
     def __init__(self, name, config={}):
-        super(LinkamStage, self).__init__(name, config)
+        super().__init__(name, config)
         ## Connection to the XY stage controller (serial.Serial instance).
         self._proxy = Pyro4.Proxy(config.get('uri'))
         ## Lock around sending commands to the XY stage controller.
@@ -160,10 +147,6 @@ class LinkamStage(MicroscopeBase, stage.StageDevice):
         self.positionCache = (None, None)
         ## Target positions for movement in X and Y.
         self.motionTargets = [None, None]
-        ## Time of last action using the stage.
-        self.lastPiezoTime = time.time()
-        ## Stage velocity
-        self.stageVelocity = [None, None]
         ## Flag to show that sendPositionUpdates is running.
         self.sendingPositionUpdates = False
         ## Status dict updated by remote.
@@ -182,29 +165,8 @@ class LinkamStage(MicroscopeBase, stage.StageDevice):
             _, ylim = zip(*DEFAULT_LIMITS)
         self.hardlimits = tuple(zip(xlim, ylim))
         self.softlimits = self.hardlimits
-        if not self.getPrimitives():
-            xoff = self.config.get('xoffset', 0)
-            yoff = self.config.get('yoffset', 0)
-            xmid = xoff + (xlim[0] + xlim[1]) / 2
-            ymid = yoff + (ylim[0] + ylim[1]) / 2
-            radius = 1500
-            centres = [-4000, 0, 4000]
-            self.primitives = ['c %f %f %f' % (xmid+dx, ymid, radius) for dx in centres]
 
-
-        events.subscribe('user abort', self.onAbort)
-        #store and recall condensor LED status.
-        events.subscribe('save exposure settings', self.onSaveSettings)
-        events.subscribe('load exposure settings', self.onLoadSettings)
-
-
-    ## Save our settings in the provided dict.
-    def onSaveSettings(self, settings):
-        pass
-
-    ## Load our settings from the provided dict.
-    def onLoadSettings(self, settings):
-        pass
+        events.subscribe(events.USER_ABORT, self.onAbort)
 
 
     def finalizeInitialization(self):
@@ -268,12 +230,8 @@ class LinkamStage(MicroscopeBase, stage.StageDevice):
                     "%d linkam mover" % axis, "%d stage motion" % axis, False,
                     {'moveAbsolute': self.moveAbsolute,
                          'moveRelative': self.moveRelative,
-                         'getPosition': self.getPosition,
-                         'setSafety': self.setSafety, 
-                         'getPrimitives': self.getPrimitives},
+                         'getPosition': self.getPosition},
                     axis,
-                    [1, 2, 5, 10, 50, 100, 200], # step sizes
-                    3, # initial step size index,
                     (minPos, maxPos), # hard limits
                     (minPos, maxPos) # soft limits
                     )
@@ -323,7 +281,6 @@ class LinkamStage(MicroscopeBase, stage.StageDevice):
             elif r == 'external':
                 self.elements[r].setRefillFunc(self._proxy.refill_dewar)
         panel.Fit()
-        self.hasUI = True
         return panel
 
 
@@ -366,15 +323,15 @@ class LinkamStage(MicroscopeBase, stage.StageDevice):
             # Sleep at start of loop to allow stage time to respond to
             # move request so remote.isMoving() returns True.
             time.sleep(0.1)
-            coords = self.getPosition(shouldUseCache=False)
-            for axis, value in enumerate(coords):
-                events.publish('stage mover',
-                               '%d linkam mover' % axis, 
-                               axis, value)
+            # Update position cache before publishing STAGE_MOVER so
+            # that the UI gets the new position when it queries it.
+            self.getPosition(shouldUseCache=False)
+            for axis in [0, 1]:
+                events.publish(events.STAGE_MOVER, axis)
             moving = self._proxy.is_moving()
 
         for axis in (0, 1):
-            events.publish('stage stopped', '%d linkam mover' % axis)
+            events.publish(events.STAGE_STOPPED, '%d linkam mover' % axis)
             self.motionTargets = [None, None]
         self.sendingPositionUpdates = False
         return
@@ -410,15 +367,6 @@ class LinkamStage(MicroscopeBase, stage.StageDevice):
             return self.positionCache
         else:
             return self.positionCache[axis]
-
-
-    def setSafety(self, axis, value, isMax):
-        """Set safety limits on range of motion."""
-        pass
-
-
-    def setLight(self, state):
-        self._proxy.set_light(state)
 
 
     def updateUI(self):

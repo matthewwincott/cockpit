@@ -49,11 +49,8 @@
 ## ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 ## POSSIBILITY OF SUCH DAMAGE.
 
-
 from cockpit import depot
-from . import deviceHandler
-
-from cockpit import events
+from cockpit.handlers import deviceHandler
 
 
 ## This handler mostly just handles setting up incoming communications
@@ -66,9 +63,7 @@ class ServerHandler(deviceHandler.DeviceHandler):
     # - unregister(func): Stops the provided function from receiving
     #   outside events.
     def __init__(self, name, groupName, callbacks):
-        deviceHandler.DeviceHandler.__init__(self, name, groupName, False,
-                callbacks, depot.SERVER)
-        
+        super().__init__(name, groupName, False, callbacks, depot.SERVER)
 
     ## Register a new function.
     def register(self, func, localIp = None):

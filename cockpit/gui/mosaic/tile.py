@@ -49,11 +49,71 @@
 ## ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 ## POSSIBILITY OF SUCH DAMAGE.
 
+"""
+Handles display of a single tile in the canvas.  A tile is either a
+single image from one camera, or a larger array of low-resolution
+images from that camera; the latter is used when zoomed out, as a
+performance measure.
+
+"""
 
 import numpy
-from OpenGL.GL import *
-from OpenGL import GLUT
-from OpenGL.GL.framebufferobjects import *
+from OpenGL.GL import (
+    GL_BLUE_BIAS,
+    GL_BLUE_SCALE,
+    GL_CLAMP,
+    GL_COLOR_ATTACHMENT0,
+    GL_DRAW_FRAMEBUFFER,
+    GL_FLOAT,
+    GL_GREEN_BIAS,
+    GL_GREEN_SCALE,
+    GL_LINEAR,
+    GL_LUMINANCE,
+    GL_MAP_COLOR,
+    GL_MODELVIEW,
+    GL_NEAREST,
+    GL_PROJECTION,
+    GL_QUADS,
+    GL_RED_BIAS,
+    GL_RED_SCALE,
+    GL_RGB,
+    GL_SHORT,
+    GL_TEXTURE_2D,
+    GL_TEXTURE_MAG_FILTER,
+    GL_TEXTURE_MIN_FILTER,
+    GL_TEXTURE_WRAP_S,
+    GL_TEXTURE_WRAP_T,
+    GL_UNPACK_ALIGNMENT,
+    GL_UNPACK_SWAP_BYTES,
+    GL_UNSIGNED_BYTE,
+    GL_UNSIGNED_SHORT,
+    glBegin,
+    glBindFramebuffer,
+    glBindTexture,
+    glColor3f,
+    glDeleteTextures,
+    glEnable,
+    glEnd,
+    glFramebufferTexture2D,
+    glGenFramebuffers,
+    glGenTextures,
+    glLoadIdentity,
+    glMatrixMode,
+    glOrtho,
+    glPixelStorei,
+    glPixelTransferf,
+    glPixelTransferi,
+    glPopMatrix,
+    glPushMatrix,
+    glTexCoord2f,
+    glTexImage2D,
+    glTexParameteri,
+    glTexSubImage2D,
+    glTranslatef,
+    glVertex2f,
+    glViewport,
+)
+
 
 ## This module contains the Tile and MegaTile classes, along with some
 # supporting functions and constants.
@@ -84,8 +144,7 @@ dtypeToGlTypeMap = {
 ## This class handles a single tile in the mosaic.
 class Tile:
     def __init__(self, textureData, pos, size,
-            histogramScale, layer, isShown = True,
-            shouldDelayAllocation = False):
+            histogramScale, layer, shouldDelayAllocation=False):
 
         ## Array of pixel brightnesses
         self.textureData = textureData
@@ -270,12 +329,6 @@ class Tile:
 # we have to wait for OpenGL to get set up in our window before we can
 # use it.
 megaTileFramebuffer = None
-## Unallocate the framebuffer
-def clearFramebuffer():
-    global megaTileFramebuffer
-    if megaTileFramebuffer is not None:
-        glDeleteFramebuffers([megaTileFramebuffer])
-        megaTileFramebuffer = None
 
 ## This class handles pre-rendering of normal-sized Tile instances
 # at a reduced level of detail, which allows us to keep the program
@@ -296,7 +349,7 @@ class MegaTile(Tile):
     # At this time, if megaTileFramebuffer has not been created
     # yet, create it.
     def __init__(self, pos):
-        Tile.__init__(self, self._emptyTileData, pos,
+        super().__init__(self._emptyTileData, pos,
                  (self.micronSize, self.micronSize),
                  (0, 1), 'megatiles',
                  shouldDelayAllocation = True)
@@ -324,7 +377,7 @@ class MegaTile(Tile):
 
     ## Go through the provided list of Tiles, find the ones that overlap
     # our area, and prerender them to our texture
-    def prerenderTiles(self, tiles, viewer):
+    def prerenderTiles(self, tiles):
         if not tiles:
             return
         minX = self.pos[0]
@@ -368,7 +421,7 @@ class MegaTile(Tile):
     ## Prevent trying to delete our texture if we haven't made it yet.
     def wipe(self):
         if self.haveAllocatedMemory:
-            Tile.wipe(self)
+            super().wipe()
             self.haveAllocatedMemory = False
             self.numRenderedTiles = 0
             
@@ -376,7 +429,7 @@ class MegaTile(Tile):
     ## Prevent allocating a new texture if we haven't drawn anything yet.
     def recreateTexture(self):
         if self.haveAllocatedMemory:
-            Tile.recreateTexture(self)
+            super().recreateTexture()
             self.refresh()
 
 
@@ -384,4 +437,4 @@ class MegaTile(Tile):
         if not self.numRenderedTiles:
             # We're empty, so no need to render.
             return
-        Tile.render(self, viewBox)
+        super().render(viewBox)

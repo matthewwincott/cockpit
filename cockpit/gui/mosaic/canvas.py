@@ -51,30 +51,36 @@
 ## ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 ## POSSIBILITY OF SUCH DAMAGE.
 
-
 import numpy
 from OpenGL.GL import *
 import traceback
 import wx.glcanvas
 
-from cockpit import depot
 from cockpit import events
-from .tile import Tile, MegaTile
+from cockpit.gui.mosaic.tile import Tile, MegaTile
 import cockpit.util.datadoc
 import cockpit.util.logger
 import cockpit.util.threads
-import itertools
 import queue
 import time
 import numpy as np
+
 
 ## Zoom level at which we switch from rendering megatiles to rendering tiles.
 ZOOM_SWITCHOVER = 1
 BUFFER_LENGTH = 32
 
-## This class handles drawing the mosaic. Mosaics consist of collections of 
-# images from the cameras.
+
 class MosaicCanvas(wx.glcanvas.GLCanvas):
+    """Canvas where the mosaic is drawn.
+
+    Mosaics consist of collections of images from the cameras.  This
+    class sets up the OpenGL canvas that image data is drawn to.  Has
+    a basic level-of-detail system so that the computer doesn't bog
+    down horribly when trying to draw thousands of tiles at the same
+    time.
+
+    """
     ## Tiles and context are shared amongst all instances, since all
     # offer views of the same data.
     # The first instance creates the context.
@@ -95,7 +101,7 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
     # \param mouseCallback Function to propagate mouse events to.
     def __init__(self, parent, stageHardLimits, overlayCallback, 
             mouseCallback, *args, **kwargs):
-        wx.glcanvas.GLCanvas.__init__(self, parent, *args, **kwargs)
+        super().__init__(parent, *args, **kwargs)
 
         self.stageHardLimits = stageHardLimits
         self.overlayCallback = overlayCallback
@@ -104,11 +110,8 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
         self.dx, self.dy = 0.0, 0.0
         ## Scaling factor.
         self.scale = 1.0
-
         ## Set to True once we've done some initialization.
         self.haveInitedGL = False
-        ## Controls whether we rerender tiles during our onPaint.
-        self.shouldRerender = True
         ## WX rendering context
         if MosaicCanvas.context is None:
             # This is the first (and master) instance.
@@ -127,7 +130,10 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
         self.Bind(wx.EVT_MOUSE_EVENTS, mouseCallback)
         # Do nothing on this event, to avoid flickering.
         self.Bind(wx.EVT_ERASE_BACKGROUND, lambda event: event)
-
+        #event on DPI chnage on high DPI screens, needed for Mac retina
+        #displays.
+        self.Bind(wx.EVT_DPI_CHANGED, self.onDPIchange)
+  
 
 
     ## Now that OpenGL's ready to go, perform any necessary initialization.
@@ -138,8 +144,7 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
 
         # Non-zero objective offsets require expansion of area covered
         # by megatiles.
-        objs = depot.getHandlersOfType(depot.OBJECTIVE)
-        offsets = list(itertools.chain(*[ob.nameToOffset.values() for ob in objs]))
+        offsets = [h.offset for h in wx.GetApp().Objectives.GetHandlers()]
         minmax = lambda l: (min(l), max(l))
         xOffLim = minmax([-offset[0] for offset in offsets])
         yOffLim = minmax([offset[1] for offset in offsets])
@@ -159,15 +164,17 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
         # Arrays run [0,0] .. [ncols, nrows]; GL runs (-1,-1) .. (1,1). Since
         # making adjustments to render [0,0] at (-1,1), we now add two megatiles
         # at each y limit, rather than 4 at one edge.
-        vendor = glGetString(GL_VENDOR)
         tsize = glGetInteger(GL_MAX_TEXTURE_SIZE)
-        if vendor.startswith(b'Intel'):
-            # If we use the full texture size, it seems it's too large
-            # for manipulation in a framebuffer on Macs with Intel chipsets.
-            # GL_MAX_FRAMEBUFFER_WIDTH and _HEIGHT are not available, so we
-            # just use a quarter of the max texture size, which has been found
-            # to work intests on 2017-ish MacbookPro.
-            tsize //= 4
+        # If we use the full texture size, it seems it's too large for manipul-
+        # ation in a framebuffer:
+        #   * on Macs with Intel chipsets;
+        #   * on some mobile nVidia chipsets.
+        # Check vendor with glGetString(GL_VENDOR)
+        # GL_MAX_FRAMEBUFFER_WIDTH and _HEIGHT are not universally available,
+        # so we just use a quarter of the max texture size or a reasonable
+        # upper bound which has been found to work in tests on 2017-ish
+        # Macbook Pro.
+        tsize = min(tsize // 4, 16384)
         MegaTile.setPixelSize(tsize)
         xMin += min(0, xOffLim[0]) - MegaTile.micronSize
         xMax += max(0, xOffLim[1]) + MegaTile.micronSize
@@ -189,13 +196,13 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
             tiles = self.megaTiles
         for tile in tiles:
             tile.recreateTexture()
-            tile.prerenderTiles(self.tiles, self)
+            tile.prerenderTiles(self.tiles)
 
 
     ## Delete all tiles and textures, including the megatiles.
     def deleteAll(self):
         self.deleteTilesList(list(self.tiles))
-        events.publish('mosaic update')
+        events.publish(events.MOSAIC_UPDATE)
 
 
     ## Get all tiles that intersect the specified box, pulling from the provided
@@ -272,7 +279,7 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
     ## Delete all tiles that intersect the specified box.
     def deleteTilesIntersecting(self, start, end):
         self.deleteTilesList(self.getTilesIntersecting(start, end))
-        events.publish('mosaic update')
+        events.publish(events.MOSAIC_UPDATE)
                
 
     ## Delete a list of tiles.
@@ -292,7 +299,7 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
                     break
         self.rerenderMegatiles(dirtied)
         self.Refresh()
-        events.publish('mosaic update')
+        events.publish(events.MOSAIC_UPDATE)
 
 
     def onIdle(self, event):
@@ -307,12 +314,12 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
             newTiles.append(Tile(data, pos, size, scalings, layer))
         self.tiles.extend(newTiles)
         for megaTile in self.megaTiles:
-            megaTile.prerenderTiles(newTiles, self)
+            megaTile.prerenderTiles(newTiles)
 
         self.tilesToRefresh.update(newTiles)
 
         self.Refresh()
-        events.publish('mosaic update')
+        events.publish(events.MOSAIC_UPDATE)
         if not self.pendingImages.empty():
             event.RequestMore()
 
@@ -351,7 +358,7 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
             if not self.haveInitedGL:
                 self.initGL()
 
-            width, height = self.GetClientSize()
+            width, height = self.GetClientSize()*self.GetContentScaleFactor()
 
             glViewport(0, 0, width, height)
             glMatrixMode(GL_PROJECTION)
@@ -397,7 +404,7 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
         # Paranoia
         if not scale:
             return
-        width, height = self.GetClientSize()
+        width, height = self.GetClientSize()*self.GetContentScaleFactor()
         self.dx = -x * scale + width / 2
         self.dy = -y * scale + height / 2
         self.scale = scale
@@ -411,13 +418,17 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
         if multiplier == 0:
             return
         self.scale *= multiplier
-        width, height = self.GetClientSize()
+        width, height = self.GetClientSize()*self.GetContentScaleFactor()
         halfWidth = width / 2
         halfHeight = height / 2
         self.dx = halfWidth - (halfWidth - self.dx) * multiplier
         self.dy = halfHeight - (halfHeight - self.dy) * multiplier
         self.Refresh()
 
+    def onDPIchange(self,event):
+        #not an ideal solution as visible region changes but
+        #recalcs positions etc...
+        self.multiplyZoom(1)
 
     ## Change our translation by the specified number of pixels.
     def dragView(self, offset):
@@ -428,7 +439,10 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
 
     ## Remap an (X, Y) tuple of screen coordinates to a location on the stage.
     def mapScreenToCanvas(self, pos):
-        height = self.GetClientSize()[1]
+        scaleFactor = self.GetContentScaleFactor()
+        pos = (pos[0]*scaleFactor,pos[1]*scaleFactor)
+        
+        height = self.GetClientSize()[1]*scaleFactor
         return ((self.dx - pos[0]) / self.scale,
                 -(self.dy - height + pos[1]) / self.scale)
 
@@ -436,19 +450,11 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
     ## Return a (bottom left, top right) tuple showing what part
     # of the stage is currently visible.
     def getViewBox(self):
-        width, height = self.GetClientSize()
+        width, height = self.GetClientSize()*self.GetContentScaleFactor()
         bottomLeft = (-self.dx / self.scale, -self.dy / self.scale)
         topRight = (-(self.dx - width) / self.scale,
                        -(self.dy - height) / self.scale)
         return (bottomLeft, topRight)
-
-
-    ## Toggle display of the specified layer
-    def toggleLayer(self, layer, isHidden):
-        if isHidden:
-            self.m_noShowLayers.add(layer)
-        elif layer in self.m_noShowLayers:
-            self.m_noShowLayers.remove(layer)
 
 
     ## Given a path to a file, save the mosaic to that file and an adjacent
@@ -518,7 +524,6 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
                 # We'll have to convert the pixel sizes and layer to
                 # ints later.
                 tileStats.append(list(map(float, line.strip().split(','))))
-        numInitialTiles = len(self.tiles)
         try:
             doc = cockpit.util.datadoc.DataDoc(mrcPath)
         except Exception as e:
@@ -568,9 +573,4 @@ class MosaicCanvas(wx.glcanvas.GLCanvas):
                 break
             time.sleep(.1)
         wx.CallAfter(statusDialog.Destroy)
-        events.publish('mosaic update')
-               
-
-    ## Return our list of Tiles.
-    def getTiles(self):
-        return self.tiles
+        events.publish(events.MOSAIC_UPDATE)

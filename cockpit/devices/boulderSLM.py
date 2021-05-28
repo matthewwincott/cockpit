@@ -19,31 +19,18 @@
 ## You should have received a copy of the GNU General Public License
 ## along with Cockpit.  If not, see <http://www.gnu.org/licenses/>.
 
-
-""" This module makes a BNS SLM  device available to Cockpit.
-
-Sample config entry:
-  [slm]
-  type: BoulderSLM
-  triggerSource: dsp
-  triggerLine: 2
-  uri: PYRO:pyroSLM@slmhost:8000
-
-  [dsp]
-  type: LegacyDSP
-  ...
-
-"""
+"""Boulder SLM."""
 
 from collections import OrderedDict
 import decimal
-from . import device
+from cockpit.devices import device
 from itertools import groupby
 import Pyro4
 import wx
 
 from cockpit import events
 import cockpit.gui.device
+import cockpit.gui.dialogs.getNumberDialog
 import cockpit.handlers.executor
 import time
 import cockpit.util
@@ -85,15 +72,27 @@ class _LastParameters():
 
 
 class BoulderSLM(device.Device):
+    """Boulder SLM device.
+
+    Sample config entry:
+
+    .. code:: ini
+
+        [slm]
+        type: cockpit.devices.boulderSLM.BoulderSLM
+        uri: PYRO:pyroSLM@slmhost:8000
+        triggerSource: NAME_OF_EXECUTOR_DEVICE
+        triggerLine: 2
+
+    """
+
     _config_types = {
         'settlingtime': float,
         'triggerLine': int,
     }
 
     def __init__(self, name, config={}):
-        device.Device.__init__(self, name, config)
-        if not self.isActive:
-            return
+        super().__init__(name, config)
         self.connection = None
         self.asproxy = None
         self.position = None
@@ -116,6 +115,11 @@ class BoulderSLM(device.Device):
         if angle:
             self.connection.set_sim_diffraction_angle(angle)
 
+    def onExit(self) -> None:
+        for proxy in [self.connection, self.asproxy]:
+            if proxy is not None:
+                proxy._pyroRelease()
+        super().onExit()
 
     def finalizeInitialization(self):
         # A mapping of context-menu entries to functions.
@@ -167,8 +171,7 @@ class BoulderSLM(device.Device):
         # is reached.
         for t, h, args in table[startIndex:stopIndex]:
             events.publish(events.UPDATE_STATUS_LIGHT, 'device waiting',
-                           'SLM moving to\nindex %d' % args,
-                           (255, 255, 0))
+                           'SLM moving to index %d' % args)
             self.cycleToPosition(args)
 
     def examineActions(self, table):
@@ -198,9 +201,6 @@ class BoulderSLM(device.Device):
         for i, (t, handler, action) in enumerate(table.actions):
             if handler is not self.handler:
                 # Nothing to do
-                continue
-            elif action in [True, False]:
-                # Trigger action generated on earlier pass through.
                 continue
             # Action specifies a target frame in the sequence.
             # Remove original event.
@@ -292,11 +292,9 @@ class BoulderSLM(device.Device):
         # Set up a timer to update value displays.
         self.updateTimer = wx.Timer(posDisplay)
         self.updateTimer.Start(1000)
-        self.display = posDisplay
         # Changed my mind. SIM diffraction angle is an advanced parameter,
         # so it now lives in a right-click menu rather than on a button.
         panel.Bind(wx.EVT_CONTEXT_MENU, self.onRightMouse)
-        self.hasUI = True
         # Controls other than powerButton only enabled when SLM is enabled.
         triggerButton.Disable()
         posDisplay.Disable()
@@ -336,9 +334,9 @@ class BoulderSLM(device.Device):
 
 
     def performSubscriptions(self):
-        #events.subscribe('user abort', self.onAbort)
-        events.subscribe('prepare for experiment', self.onPrepareForExperiment)
-        events.subscribe('cleanup after experiment', self.cleanupAfterExperiment)
+        #events.subscribe(events.USER_ABORT, self.onAbort)
+        events.subscribe(events.PREPARE_FOR_EXPERIMENT, self.onPrepareForExperiment)
+        events.subscribe(events.CLEANUP_AFTER_EXPERIMENT, self.cleanupAfterExperiment)
 
 
     def wait(self, asyncResult, message):

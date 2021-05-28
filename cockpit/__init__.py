@@ -62,6 +62,7 @@ import os
 import sys
 import threading
 import traceback
+import typing
 import wx
 
 import Pyro4
@@ -76,6 +77,11 @@ if (distutils.version.LooseVersion(Pyro4.__version__) >=
 import cockpit.config
 import cockpit.depot
 import cockpit.events
+import cockpit.gui
+import cockpit.gui.loggingWindow
+import cockpit.gui.mainWindow
+import cockpit.interfaces
+import cockpit.interfaces.channels
 import cockpit.interfaces.imager
 import cockpit.interfaces.stageMover
 import cockpit.util.files
@@ -92,22 +98,39 @@ class CockpitApp(wx.App):
         ## OnInit() will make use of config, and wx.App.__init__()
         ## calls OnInit().  So we need to assign this before super().
         self._config = config
-        super(CockpitApp, self).__init__(redirect=False)
+        super().__init__(redirect=False)
 
     @property
     def Config(self):
         return self._config
 
+    @property
+    def Channels(self):
+        return self._channels
+
+    @property
+    def Imager(self):
+        return self._imager
+
+    @property
+    def Objectives(self):
+        return self._objectives
+
+    @property
+    def Stage(self):
+        return self._stage
+
     def OnInit(self):
         try:
-            # Allow subsequent actions to abort startup by publishing
-            # a "program startup failure" event.
-            events.subscribe('program startup failure', self.onStartupFail)
-            events.subscribe('program exit', self.onExit)
-
+            # Ideally we would set this per device but Pyro4 config is
+            # a singleton so our changes affects *all* devices we use
+            # (as well as anything else on the process using Pyro).
+            Pyro4.config.PICKLE_PROTOCOL_VERSION = self.Config[
+                "global"
+            ].getint("pyro-pickle-protocol")
             depot_config = self.Config.depot_config
-            depot.initialize(depot_config)
-            numDevices = len(depot_config.sections()) + 1 # + 1 is for dummy devs.
+            cockpit.depot.initialize(depot_config)
+            numDevices = len(depot_config.sections()) + 1 # +1 for dummy devices
             numNonDevices = 15
             status = wx.ProgressDialog(parent = None,
                     title = "Initializing OMX Cockpit",
@@ -117,8 +140,7 @@ class CockpitApp(wx.App):
             status.Show()
 
             # Do this early so we can see output while initializing.
-            from cockpit.gui import loggingWindow
-            loggingWindow.makeWindow(None)
+            logging_window = cockpit.gui.loggingWindow.makeWindow(None)
 
             updateNum=1
             status.Update(updateNum, "Initializing config...")
@@ -127,87 +149,79 @@ class CockpitApp(wx.App):
 
             status.Update(updateNum, "Initializing devices...")
             updateNum+=1
-            for i, device in enumerate(depot.initialize(depot_config)):
+            for device in cockpit.depot.initialize(depot_config):
                 status.Update(updateNum, "Initializing devices...\n%s" % device)
                 updateNum+=1
             status.Update(updateNum, "Initializing device interfaces...")
             updateNum+=1
-            cockpit.interfaces.imager.initialize()
+
+            self._imager = cockpit.interfaces.imager.Imager(
+                cockpit.depot.getHandlersOfType(cockpit.depot.IMAGER)
+            )
             cockpit.interfaces.stageMover.initialize()
+            self._objectives = cockpit.interfaces.Objectives(
+                cockpit.depot.getHandlersOfType(cockpit.depot.OBJECTIVE)
+            )
+            self._stage = cockpit.interfaces.stageMover.mover
+            self._channels = cockpit.interfaces.channels.Channels()
+            for fpath in self.Config['global'].getpaths('channel-files', []):
+                new_channels = cockpit.interfaces.channels.LoadFromFile(fpath)
+                self._channels.Update(new_channels)
 
             status.Update(updateNum, "Initializing user interface...")
             updateNum+=1
 
-            from cockpit.gui import mainWindow
-            frame = mainWindow.makeWindow()
-            self.SetTopWindow(frame)
+            main_window = cockpit.gui.mainWindow.makeWindow()
+            self.SetTopWindow(main_window)
 
-            for subname in ['camera.window',
-                            'mosaic.window',
-                            'macroStage.macroStageWindow',
-                            'statusLightsWindow']:
-                module = importlib.import_module('cockpit.gui.' + subname)
-                status.Update(updateNum, ' ... ' + subname)
-                updateNum+=1
-                module.makeWindow(frame)
-            # At this point, we have all the main windows are displayed.
-            self.primaryWindows = [w for w in wx.GetTopLevelWindows()]
+            # Now that the main window exists, we can reparent the
+            # logging window like all the other ones.
 
-            # Now create secondary windows. These are single instance
-            # windows that won't appear in the primary window marshalling
-            # list.
-            status.Update(updateNum, " ... secondary windows")
-            updateNum+=1
-            for module_name in ['cockpit.gui.shellWindow',
+            # We use parent.AddChild(child) even though it is not
+            # recommended.  We should be using child.Reparent(parent)
+            # but that fails pretty bad in wxMSW and wxOSX (see issue
+            # #618 and https://trac.wxwidgets.org/ticket/18785)
+            main_window.AddChild(logging_window)
+
+            for module_name in ['cockpit.gui.camera.window',
+                                'cockpit.gui.mosaic.window',
+                                'cockpit.gui.macroStage.macroStageWindow',
+                                'cockpit.gui.shellWindow',
                                 'cockpit.gui.touchscreen',
                                 'cockpit.util.intensity']:
                 module = importlib.import_module(module_name)
-                module.makeWindow(frame)
-
-            # All secondary windows created.
-            self.secondaryWindows = [w for w in wx.GetTopLevelWindows() if w not in self.primaryWindows]
-
-            for w in self.secondaryWindows:
-                #bind close event to just hide for these windows
-                w.Bind(wx.EVT_CLOSE, lambda event, w=w: w.Hide())
-                # get saved state of secondary windows.
-                title=w.GetTitle()
-                windowstate=cockpit.util.userConfig.getValue(
-                                                'windowState'+title,
-                                                default= 0)
-                #if they were hidden then return them to hidden
-                if (windowstate is 0):
-                    # Hide the window until it is called up.
-                    w.Hide()
-
-            # Now that the UI exists, we don't need this any more.
-            # Sometimes, status doesn't make it into the list, so test.
-            if status in self.primaryWindows:
-                self.primaryWindows.remove(status)
-            status.Destroy()
+                status.Update(updateNum, ' ... ' + module_name)
+                updateNum += 1
+                module.makeWindow(main_window)
 
             self.SetWindowPositions()
 
-            #now loop over secondary windows open and closeing as needed.
-            for w in self.secondaryWindows:
-                # get saved state of secondary windows.
-                title=w.GetTitle()
-                windowstate=cockpit.util.userConfig.getValue(
-                                                'windowState'+title,
-                                                default= 0)
-                #if they were hidden then return them to hidden
-                if (windowstate is 0):
-                    # Hide the window until it is called up.
-                    w.Hide()
+            main_window.Show()
+            for window in wx.GetTopLevelWindows():
+                if window is main_window:
+                    continue
+                # Cockpit assumes we have window singleton, so bind
+                # close event to hide them.
+                window.Bind(wx.EVT_CLOSE, lambda event, w=window: w.Hide())
+                # Show/Hide windows at start is decided with:
+                #   1. check userConfig (value from last time)
+                #   2. check window class property SHOW_DEFAULT
+                #   3. if none of the above is set, hide
+                default_show = getattr(window, 'SHOW_DEFAULT', False)
+                config_name = 'Show Window ' + window.GetTitle()
+                to_show = cockpit.util.userConfig.getValue(config_name,
+                                                           default=default_show)
+                window.Show(to_show)
 
+            # Now that the UI exists, we don't need this any more.
+            # Sometimes, status doesn't make it into the list, so test.
+            status.Destroy()
 
             cockpit.depot.makeInitialPublications()
-            cockpit.interfaces.imager.makeInitialPublications()
             cockpit.interfaces.stageMover.makeInitialPublications()
 
-            events.publish('cockpit initialization complete')
+            cockpit.events.publish('cockpit initialization complete')
             self.Bind(wx.EVT_ACTIVATE_APP, self.onActivateApp)
-
             return True
         except Exception as e:
             cockpit.gui.ExceptionBox(caption='Failed to initialise cockpit')
@@ -242,61 +256,30 @@ class CockpitApp(wx.App):
         if top is not uppermost:
             top.Raise()
 
-    ## Startup failed; log the failure information and exit.
-    def onStartupFail(self, *args):
-        cockpit.util.logger.log.error("Startup failed: %s" % args)
-        sys.exit()
+    def OnExit(self) -> int:
+        """Do any non-GUI cleanup.
 
+        At this point, all windows and controls have been removed, and
+        wx has ran its cleanup next.  This is the moment to cleanup
+        all our non wx stuff.
 
-    # Do anything we need to do to shut down cleanly. At this point UI
-    # objects still exist, but they won't by the time we're done.
-    def onExit(self):
-        self._SaveWindowPositions()
-
+        """
         try:
-            events.publish("user abort")
-        except Exception as e:
-            cockpit.util.logger.log.error("Error during logout: %s" % e)
+            cockpit.events.publish(cockpit.events.USER_ABORT)
+        except:
+            cockpit.util.logger.log.error("Error on USER_ABORT during exit")
             cockpit.util.logger.log.error(traceback.format_exc())
-
-        import cockpit.gui.loggingWindow
-        cockpit.gui.loggingWindow.window.WriteToLogger(cockpit.util.logger.log)
-
-        # Manually clear out any parent-less windows that still exist. This
-        # can catch some windows that are spawned by WX and then abandoned,
-        # typically because of bugs in the program. If we don't do this, then
-        # sometimes the program will continue running, invisibly, and must
-        # be killed via Task Manager.
-        for window in wx.GetTopLevelWindows():
-            cockpit.util.logger.log.error("Destroying %s" % window)
-            window.Destroy()
-
-        # Call any deviec onExit code to, for example, close shutters and
-        # switch of lasers.
         for dev in cockpit.depot.getAllDevices():
             try:
                 dev.onExit()
             except:
-                pass
-        # The following cleanup code used to be in main(), after App.MainLoop(),
-        # where it was never reached.
-        # HACK: manually exit the program. If we don't do this, then there's a small
-        # possibility that non-daemonic threads (i.e. ones that don't exit when the
-        # main thread exits) will hang around uselessly, forcing the program to be
-        # manually shut down via Task Manager or equivalent. Why do we have non-daemonic
-        # threads? That's tricky to track down. Daemon status is inherited from the
-        # parent thread, and must be manually set otherwise. Since it's easy to get
-        # wrong, we'll just leave this here to catch any failures to set daemon
-        # status.
-        badThreads = []
-        for thread in threading.enumerate():
-            if not thread.daemon:
-                badThreads.append(thread)
-        if badThreads:
-            cockpit.util.logger.log.error("Still have non-daemon threads %s" % map(str, badThreads))
-            for thread in badThreads:
-                cockpit.util.logger.log.error(str(thread.__dict__))
-        os._exit(0)
+                cockpit.util.logger.log.error(
+                    "Error on device '%s' during exit", dev.name
+                )
+                cockpit.util.logger.log.error(traceback.format_exc())
+        # Documentation states that we must return the same return value
+        # as the base class.
+        return super().OnExit()
 
 
     def SetWindowPositions(self):
@@ -308,8 +291,15 @@ class CockpitApp(wx.App):
         positions = cockpit.util.userConfig.getValue('WindowPositions',
                                                      default={})
         for window in wx.GetTopLevelWindows():
-            if window.Title in positions:
-                window.SetPosition(positions[window.Title])
+            if window.Title not in positions:
+                continue
+
+            # Saved window position may be invalid if, for example,
+            # displays have been removed, so check it before trying to
+            # move the window (see #730).
+            position = positions[window.Title]
+            if wx.Display.GetFromPoint(position) != wx.NOT_FOUND:
+                window.SetPosition(position)
 
 
     def _SaveWindowPositions(self):
@@ -328,8 +318,14 @@ class CockpitApp(wx.App):
 
         cockpit.util.userConfig.setValue('WindowPositions', positions)
 
+        for window in wx.GetTopLevelWindows():
+            if window is wx.GetApp().GetTopWindow():
+                continue
+            config_name = 'Show Window ' + window.GetTitle()
+            cockpit.util.userConfig.setValue(config_name, window.IsShown())
 
-def main():
+
+def main(argv: typing.Sequence[str]) -> int:
     ## wxglcanvas (used in the mosaic windows) does not work with
     ## wayland (see https://trac.wxwidgets.org/ticket/17702).  The
     ## workaround is to force GTK to use the x11 backend.  See also
@@ -337,15 +333,57 @@ def main():
     if wx.Platform == '__WXGTK__' and 'GDK_BACKEND' not in os.environ:
         os.environ['GDK_BACKEND'] = 'x11'
 
-    ## TODO: have this in a try, and show a window (would probably
-    ## need to be different wx.App), with the error if it fails.
-    config = cockpit.config.CockpitConfig(sys.argv)
-    cockpit.util.logger.makeLogger(config['log'])
-    cockpit.util.files.initialize(config)
+    try:
+        config = cockpit.config.CockpitConfig(argv)
+        cockpit.util.logger.makeLogger(config['log'])
+        cockpit.util.files.initialize(config)
+    except:
+        app = wx.App()
+        cockpit.gui.ExceptionBox(caption='Failed to initialise cockpit')
+        # We ProcessPendingEvents() instead of entering the MainLoop()
+        # because we won't have more windows created, meaning that the
+        # program would not exit after closing the exception box.
+        app.ProcessPendingEvents()
+    else:
+        app = CockpitApp(config=config)
+        app.MainLoop()
 
-    app = CockpitApp(config=config)
-    app.MainLoop()
+    # HACK: manually exit the program if we find threads running.  At
+    # this point, any thread running is non-daemonic, i.e., a thread
+    # that doesn't exit when the main thread exits.  These will make
+    # cockipt process hang and require it to be manually terminated.
+    # Why do we have non-daemonic threads?  Daemon status is inherited
+    # from the parent thread, and must be manually set.  Since it is
+    # easy to forget, we'll leave this here to catch any failure and
+    # remind us.
+    #
+    # All this assumes that cockpit is the only program running and this
+    # prevents `cockpit.main()` from being called in other programs.
+    badThreads = []
+    for thread in threading.enumerate():
+        if not thread.daemon and thread is not threading.main_thread():
+            badThreads.append(thread)
+    if badThreads:
+        cockpit.util.logger.log.error(
+            "Found %d non-daemon threads at exit.  These are:", len(badThreads)
+        )
+        for thread in badThreads:
+            cockpit.util.logger.log.error(
+                "Thread '%s': %s", thread.name, thread.__dict__
+            )
+        os._exit(1)
+    return 0
 
 
-if __name__ == '__main__':
-    main()
+def _setuptools_entry_point() -> int:
+    # The setuptools entry point must be a function, it can't be a
+    # module or a package.  Also, setuptools does not pass sys.argv to
+    # the entry option, the entry point must access sys.argv itself
+    # but we want our main to take argv as argument so it can be
+    # called from other programs.  We also don't want main's argv
+    # argument to default to sys.argv because 1) bad idea to use
+    # mutable objects as default arguments, and 2) when the
+    # documentation is generated (with Sphinx's autodoc extension),
+    # then sys.argv gets replaced with the sys.argv value at the time
+    # docs were generated (see https://stackoverflow.com/a/12087750 ).
+    return main(sys.argv)

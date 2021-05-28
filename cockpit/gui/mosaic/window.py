@@ -51,47 +51,40 @@
 ## ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 ## POSSIBILITY OF SUCH DAMAGE.
 
-
 import collections
-from cockpit.util import ftgl
-import numpy
-from OpenGL.GL import *
-import os
-import scipy.ndimage.measurements
+import math
 import threading
 import time
-import wx
 
-from . import canvas
-from cockpit import depot
-from cockpit import events
+import numpy
+import scipy.ndimage.measurements
+import wx
+from OpenGL.GL import *
+
 import cockpit.gui
 import cockpit.gui.camera.window
+import cockpit.gui.dialogs.getNumberDialog
 import cockpit.gui.dialogs.gridSitesDialog
 import cockpit.gui.dialogs.offsetSitesDialog
+import cockpit.gui.freetype
 import cockpit.gui.guiUtils
 import cockpit.gui.keyboard
-from cockpit.gui.primitive import Primitive
+import cockpit.interfaces
 import cockpit.interfaces.stageMover
 import cockpit.util.files
-import cockpit.util.threads
 import cockpit.util.userConfig
-import math
+from cockpit import depot
+from cockpit import events
+from cockpit.gui.mosaic import canvas
+from cockpit.gui.primitive import Primitive
 
-## Size of the crosshairs indicating the stage position.
-CROSSHAIR_SIZE = 10000
+
 ## Valid colors to use for site markers.
 SITE_COLORS = [('green', (0, 1, 0)), ('red', (1, 0, 0)),
     ('blue', (0, 0, 1)), ('orange', (1, .6, 0))]
 
-## Width of widgets in the sidebar.
-SIDEBAR_WIDTH = 150
-
 ## Timeout for mosaic new image events
 CAMERA_TIMEOUT = 1
-##how good a circle to draw
-CIRCLE_SEGMENTS = 32
-PI = 3.141592654
 
 ## Simple structure for marking potential beads.
 BeadSite = collections.namedtuple('BeadSite', ['pos', 'size', 'intensity'])
@@ -114,7 +107,7 @@ def _pauseMosaicLoop(func):
     return wrapped
 
 
-class MosaicCommon(object):
+class MosaicCommon:
     # A class to house methods that are common to both the Mosaic
     # and TouchScreen windows. Previously, these were dynamically
     # rebound on the TouchScreen window, which worked fine in
@@ -147,15 +140,14 @@ class MosaicCommon(object):
     #   put self.scalefont onto the canvas;
     #   pull self.offset straight from the objective;
     #   move self.selectedSites to the stageMover or some other space manager;
-    #   eliminate self.drawPrimitives - they're useful for navigation and don't add much clutter.
     def drawOverlay(self):
+        siteLineWidth = max(1, self.canvas.scale * 1.5)
+        siteFontScale = 3 / max(5.0, self.canvas.scale)
         for site in cockpit.interfaces.stageMover.getAllSites():
             # Draw a crude circle.
             x, y = site.position[:2]
             x = -x
-            # Set line width based on zoom factor.
-            lineWidth = max(1, self.canvas.scale * 1.5)
-            glLineWidth(lineWidth)
+            glLineWidth(siteLineWidth)
             glColor3f(*site.color)
             glBegin(GL_LINE_LOOP)
             for i in range(8):
@@ -166,10 +158,8 @@ class MosaicCommon(object):
 
             glPushMatrix()
             glTranslatef(x, y, 0)
-            # Scale the text with respect to the current zoom factor.
-            fontScale = 3 / max(5.0, self.canvas.scale)
-            glScalef(fontScale, fontScale, 1)
-            self.sitefont.render(str(site.uniqueID))
+            glScalef(siteFontScale, siteFontScale, 1)
+            self.site_face.render(str(site.uniqueID))
             glPopMatrix()
 
         self.drawCrosshairs(cockpit.interfaces.stageMover.getPosition()[:2], (1, 0, 0),
@@ -223,7 +213,8 @@ class MosaicCommon(object):
             # Scale bar width.
             self.scalebar = 100*(10**math.floor(math.log(1/self.canvas.scale,10)))
             # Scale bar position, near the top left-hand corner.
-            scalebarPos = [30,-10]
+            scaleFactor = self.GetContentScaleFactor()
+            scalebarPos = [30*scaleFactor,-10*scaleFactor]
 
             # Scale bar vertices.
             x1 = scalebarPos[0]/self.canvas.scale
@@ -238,7 +229,7 @@ class MosaicCommon(object):
             # Do the actual drawing
             glColor3f(255, 0, 0)
             # The scale bar itself.
-            glLineWidth(8)
+            glLineWidth(8*scaleFactor)
             glBegin(GL_LINES)
             glVertex2f(x1,y1)
             glVertex2f(x2,y1)
@@ -247,34 +238,29 @@ class MosaicCommon(object):
             # The scale label.
             glPushMatrix()
             labelPosX= x1
-            labelPosY= y1 - (20./self.canvas.scale)
+            labelPosY= y1 - (20.*scaleFactor/self.canvas.scale)
             glTranslatef(labelPosX, labelPosY, 0)
-            fontScale = 1. / self.canvas.scale
+            fontScale = scaleFactor / self.canvas.scale
             glScalef(fontScale, fontScale, 1.)
             if (self.scalebar>1.0):
-                self.scalefont.render('%d um' % self.scalebar)
+                self.scale_face.render('%d um' % self.scalebar)
             else:
-                self.scalefont.render('%.3f um' % self.scalebar)
+                self.scale_face.render('%.3f um' % self.scalebar)
             glPopMatrix()
 
         #Draw stage primitives.
-        if(self.drawPrimitives):
-            # Draw device-specific primitives.
-            glEnable(GL_LINE_STIPPLE)
-            glLineStipple(1, 0xAAAA)
-            glColor3f(0.4, 0.4, 0.4)
-            glColor3f(0.4, 0.4, 0.4)
-            glMatrixMode(GL_MODELVIEW)
-            glPushMatrix()
-            # Reflect x-cordinates.
-            glMultMatrixf([-1.,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1])
-            primitives = cockpit.interfaces.stageMover.getPrimitives()
-            for p in primitives:
-                if p not in self.primitives:
-                    self.primitives[p] = Primitive.factory(p)
-                self.primitives[p].render()
-            glPopMatrix()
-            glDisable(GL_LINE_STIPPLE)
+        glEnable(GL_LINE_STIPPLE)
+        glLineStipple(1, 0xAAAA)
+        glColor3f(0.4, 0.4, 0.4)
+        glColor3f(0.4, 0.4, 0.4)
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        # Reflect x-cordinates.
+        glMultMatrixf([-1.,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1])
+        for primitive in self.primitives:
+            primitive.render()
+        glPopMatrix()
+        glDisable(GL_LINE_STIPPLE)
 
 
     # Draw a crosshairs at the specified position with the specified color.
@@ -305,15 +291,14 @@ class MosaicCommon(object):
 
         glBegin(GL_LINE_LOOP)
         # Draw the box.
-        # get cams and objective opbjects
         cams = depot.getActiveCameras()
-        objective = depot.getHandlersOfType(depot.OBJECTIVE)[0]
         # if there is a camera us its real pixel count
         if (len(cams) > 0):
+            pixel_size = wx.GetApp().Objectives.GetPixelSize()
             width, height = cams[0].getImageSize()
-            self.crosshairBoxSize = width * objective.getPixelSize()
+            self.crosshairBoxSize = width * pixel_size
             width = self.crosshairBoxSize
-            height = height * objective.getPixelSize()
+            height = height * pixel_size
         else:
             # else use the default which is 512Xpixel size from objective
             width = self.crosshairBoxSize
@@ -329,14 +314,10 @@ class MosaicCommon(object):
 
 ## This class handles the UI of the mosaic.
 class MosaicWindow(wx.Frame, MosaicCommon):
+    SHOW_DEFAULT = True
     def __init__(self, *args, **kwargs):
-        wx.Frame.__init__(self, *args, **kwargs)
-        self.SetWindowStyle(self.GetWindowStyle() | wx.FRAME_NO_TASKBAR)
-        self.panel = wx.Panel(self)
+        super().__init__(*args, **kwargs)
         sizer = wx.BoxSizer(wx.HORIZONTAL)
-
-        ## Mapping of primitive specifications to Primitives.
-        self.primitives = {}
         ## Prevent r-click on buttons displaying MainWindow context menu.
         self.Bind(wx.EVT_CONTEXT_MENU, lambda event: None)
         ## Last known location of the mouse.
@@ -351,6 +332,9 @@ class MosaicWindow(wx.Frame, MosaicCommon):
         self.offset=(0,0)
         ## Event object to control run state of mosaicLoop.
         self.shouldContinue = threading.Event()
+
+        primitive_specs = wx.GetApp().Config['stage'].getlines('primitives', [])
+        self.primitives = [Primitive.factory(spec) for spec in primitive_specs]
 
         ## Camera used for making a mosaic
         self.camera = None
@@ -370,24 +354,16 @@ class MosaicWindow(wx.Frame, MosaicCommon):
         # (point on plane, normal vector to plane).
         self.focalPlaneParams = None
 
-        ## Font to use for site labels.
-        self.sitefont = ftgl.TextureFont(cockpit.gui.FONT_PATH)
-        self.defaultFaceSize = 96
-        self.sitefont.setFaceSize(self.defaultFaceSize)
-
-        ## A font to use for the scale bar.
-        # We used to resize the site font dynamically to do this,
-        # but it seems to break on some GL implementations so that
-        # the default face size was not restored correctly.
-        self.scalefont = ftgl.TextureFont(cockpit.gui.FONT_PATH)
-        self.scalefont.setFaceSize(18)
+        # Fonts to use for site labels and scale bar.  Keep two
+        # separate fonts instead of dynamically changing the font size
+        # because changing the font size would mean discarding the
+        # glyph textures for that size.
+        self.site_face = cockpit.gui.freetype.Face(self, 96)
+        self.scale_face = cockpit.gui.freetype.Face(self, 18)
 
         #default scale bar size is Zero
         self.scalebar = cockpit.util.userConfig.getValue('mosaicScaleBar',
                                                          default= 0)
-        #Default to drawing primitives
-        self.drawPrimitives = cockpit.util.userConfig.getValue('mosaicDrawPrimitives',
-                                                               default = True)
         ## Maps button names to wx.Button instances.
         self.nameToButton = {}
 
@@ -429,15 +405,15 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                  "Allows you to select mosaic tiles and search for isolated " +
                  "beads in them. A site will be placed over each one. This " +
                  "is useful for collecting PSFs.")]:
-            button = self.makeButton(self.panel, *args)
+            button = self.makeButton(self, *args)
             sideSizer.Add(button, 0, wx.EXPAND)
 
         ## Panel for controls dealing with specific sites.
-        self.sitesPanel = wx.Panel(self.panel, style = wx.BORDER_SUNKEN)
+        self.sitesPanel = wx.Panel(self, style = wx.BORDER_SUNKEN)
         sitesSizer = wx.BoxSizer(wx.VERTICAL)
         ## Holds a list of sites.
         self.sitesBox = wx.ListBox(self.sitesPanel,
-                style = wx.LB_EXTENDED | wx.LB_SORT, size = (SIDEBAR_WIDTH, -1))
+                                   style=wx.LB_EXTENDED|wx.LB_SORT)
         self.sitesBox.Bind(wx.EVT_LISTBOX, self.onSelectSite)
         self.sitesBox.Bind(wx.EVT_LISTBOX_DCLICK, self.onDoubleClickSite)
         events.subscribe('new site', self.onNewSiteCreated)
@@ -460,35 +436,42 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                 ('Load saved sites', self.loadSavedSites, None,
                  'Load sites from a file previously generated by the "Save sites to file" button.')
                 ]:
-            button = self.makeButton(self.sitesPanel, *args,
-                    size = (SIDEBAR_WIDTH, -1))
-            sitesSizer.Add(button)
+            button = self.makeButton(self.sitesPanel, *args)
+            sitesSizer.Add(button, 0, wx.EXPAND)
 
         self.sitesPanel.SetSizerAndFit(sitesSizer)
-        sideSizer.Add(self.sitesPanel, 1)
+        sideSizer.Add(self.sitesPanel, 1, wx.EXPAND)
         sizer.Add(sideSizer, 0, wx.EXPAND)
 
-        limits = cockpit.interfaces.stageMover.getHardLimits()[:2]
+        # The MosaicCanvas can't figure out its own best size so it
+        # just disappears after Fit.  We suggest its width to be 3/4
+        # of the window width.
+        side_panel_size = sideSizer.ComputeFittingClientSize(self)
+        canvas_size = (side_panel_size[0] * 3, side_panel_size[1])
+
         ## MosaicCanvas instance.
-        self.canvas = canvas.MosaicCanvas(self.panel, limits, self.drawOverlay,
-                self.onMouse)
+        limits = cockpit.interfaces.stageMover.getHardLimits()[:2]
+        self.canvas = canvas.MosaicCanvas(self, limits, self.drawOverlay,
+                                          self.onMouse, size=canvas_size)
         sizer.Add(self.canvas, 1, wx.EXPAND)
-        self.panel.SetSizerAndFit(sizer)
-        self.SetRect((1280, 456, 878, 560))
 
-        events.subscribe('stage position', self.onAxisRefresh)
-        events.subscribe('stage step size', self.onAxisRefresh)
+        self.SetSizerAndFit(sizer)
+
+        events.subscribe(events.STAGE_POSITION, self.onAxisRefresh)
         events.subscribe('soft safety limit', self.onAxisRefresh)
-        events.subscribe('objective change', self.onObjectiveChange)
-        events.subscribe('user abort', self.onAbort)
 
-        self.Bind(wx.EVT_SIZE, self.onSize)
+        abort_emitter = cockpit.gui.EvtEmitter(self, events.USER_ABORT)
+        abort_emitter.Bind(cockpit.gui.EVT_COCKPIT, self.onAbort)
+
+        wx.GetApp().Objectives.Bind(
+            cockpit.interfaces.EVT_OBJECTIVE_CHANGED,
+            self._OnObjectiveChanged,
+        )
         self.Bind(wx.EVT_MOUSE_EVENTS, self.onMouse)
-        for item in [self, self.panel, self.canvas, self.sitesPanel]:
+        for item in [self, self.canvas, self.sitesPanel]:
             cockpit.gui.keyboard.setKeyboardHandlers(item)
 
         self.mosaicThread = None
-
 
     ## Create a button with the appropriate properties.
     def makeButton(self, parent, label, leftAction, rightAction, helpText,
@@ -508,37 +491,30 @@ class MosaicWindow(wx.Frame, MosaicCommon):
 
         # Calculate the size of the box at the center of the crosshairs.
         # \todo Should we necessarily assume a 512x512 area here?
-        objective = depot.getHandlersOfType(depot.OBJECTIVE)[0]
         #if we havent previously set crosshairBoxSize (maybe no camera active)
         if (self.crosshairBoxSize == 0):
-            self.crosshairBoxSize = 512 * objective.getPixelSize()
-        self.offset = objective.getOffset()
+            self.crosshairBoxSize = 512 * wx.GetApp().Objectives.GetPixelSize()
+        self.offset = wx.GetApp().Objectives.GetOffset()
         scale = (150./self.crosshairBoxSize)
         self.canvas.zoomTo(-curPosition[0]+self.offset[0],
                            curPosition[1]-self.offset[1], scale)
 
 
-    ## Resize our canvas.
-    def onSize(self, event):
-        size = self.GetClientSize()
-        self.panel.SetSize(size)
-        # Subtract off the pixels dedicated to the sidebar.
-        self.canvas.SetClientSize((size[0] - SIDEBAR_WIDTH, size[1]))
-
-    ## Get updated about new stage position info or step size.
+    ## Get updated about new stage position info.
     # This requires redrawing the display, if the axis is the X or Y axes.
     def onAxisRefresh(self, axis, *args):
         if axis in [0, 1]:
             # Only care about the X and Y axes.
-            wx.CallAfter(self.Refresh)
+            wx.CallAfter(self.canvas.Refresh)
 
 
     ## User changed the objective in use; resize our crosshair box to suit.
-    def onObjectiveChange(self, name, pixelSize, transform, offset, **kwargs):
-        self.crosshairBoxSize = 512 * pixelSize
-        self.offset = offset
+    def _OnObjectiveChanged(self, event: wx.CommandEvent) -> None:
+        self.crosshairBoxSize = 512 * wx.GetApp().Objectives.GetPixelSize()
+        self.offset = wx.GetApp().Objectives.GetOffset()
         #force a redraw so that the crosshairs are properly sized
         self.Refresh()
+        event.Skip()
 
 
     ## Handle mouse events.
@@ -600,27 +576,22 @@ class MosaicWindow(wx.Frame, MosaicCommon):
             menuId = 1
             for label, color in SITE_COLORS:
                 menu.Append(menuId, "Mark site with %s marker" % label)
-                self.panel.Bind(wx.EVT_MENU,
-                                lambda event, color = color: self.saveSite(color),
-                                id=menuId)
+                self.Bind(wx.EVT_MENU,
+                          lambda event, color = color: self.saveSite(color),
+                          id=menuId)
                 menuId += 1
             menu.AppendSeparator()
             menu.Append(menuId, "Set mosaic tile overlap")
-            self.panel.Bind(wx.EVT_MENU,
-                            lambda event: self.setTileOverlap(),
-                            id=menuId)
+            self.Bind(wx.EVT_MENU,
+                      lambda event: self.setTileOverlap(),
+                      id=menuId)
             menuId += 1
             menu.Append(menuId, "Toggle mosaic scale bar")
-            self.panel.Bind(wx.EVT_MENU,
-                            lambda event: self.togglescalebar(),
-                            id=menuId)
-            menuId += 1
-            menu.Append(menuId, "Toggle draw primitives")
-            self.panel.Bind(wx.EVT_MENU,
-                            lambda event: self.toggleDrawPrimitives(),
-                            id=menuId)
+            self.Bind(wx.EVT_MENU,
+                      lambda event: self.togglescalebar(),
+                      id=menuId)
 
-            cockpit.gui.guiUtils.placeMenuAtMouse(self.panel, menu)
+            cockpit.gui.guiUtils.placeMenuAtMouse(self, menu)
 
         self.prevMousePos = mousePos
 
@@ -637,7 +608,6 @@ class MosaicWindow(wx.Frame, MosaicCommon):
     ## This generator function creates a clockwise spiral pattern.
     def mosaicStepper(self):
         directions = [(0, -1), (-1, 0), (0, 1), (1, 0)]
-        curDirection = 0
         curSpiralSize = 1
         lastX = lastY = 0
         i = 0
@@ -672,7 +642,7 @@ class MosaicWindow(wx.Frame, MosaicCommon):
     def onStageMoveWhenPaused(self, axis, position):
         if axis == 2:
             return
-        events.unsubscribe("stage position", self.onStageMoveWhenPaused)
+        events.unsubscribe(events.STAGE_POSITION, self.onStageMoveWhenPaused)
         self.shouldRestart = True
 
 
@@ -697,11 +667,11 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                 events.publish("mosaic stop")
                 wx.CallAfter(self.nameToButton['Run mosaic'].SetLabel, 'Run mosaic')
                 # Detect stage movement so know whether to start new spiral on new position.
-                events.subscribe("stage position", self.onStageMoveWhenPaused)
+                events.subscribe(events.STAGE_POSITION, self.onStageMoveWhenPaused)
                 # Wait for shouldContinue event.
                 self.shouldContinue.wait()
                 # Clear subscription
-                events.unsubscribe("stage position", self.onStageMoveWhenPaused)
+                events.unsubscribe(events.STAGE_POSITION, self.onStageMoveWhenPaused)
                 # Update button label in main thread.
                 wx.CallAfter(self.nameToButton['Run mosaic'].SetLabel, 'Stop mosaic')
                 # Set reconfigure flag: cameras or objective may have changed.
@@ -731,11 +701,11 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                 if camera not in active:
                     camera = active[0]
                 # Set image width and height based on camera and objective.
-                objective = depot.getHandlersOfType(depot.OBJECTIVE)[0]
+                pixel_size = wx.GetApp().Objectives.GetPixelSize()
                 width, height = camera.getImageSize()
-                width *= objective.getPixelSize()
-                height *= objective.getPixelSize()
-                self.offset = objective.getOffset()
+                width *= pixel_size
+                height *= pixel_size
+                self.offset = wx.GetApp().Objectives.GetOffset()
                 # Successfully reconfigured: clear the flag.
                 self.shouldReconfigure = False
 
@@ -745,7 +715,7 @@ class MosaicWindow(wx.Frame, MosaicCommon):
             try:
                 data, timestamp = events.executeAndWaitForOrTimeout(
                     events.NEW_IMAGE % camera.name,
-                    cockpit.interfaces.imager.takeImage,
+                    wx.GetApp().Imager.takeImage,
                     camera.getExposureTime()/1000 + CAMERA_TIMEOUT,
                     shouldBlock=True)
             except Exception as e:
@@ -758,6 +728,17 @@ class MosaicWindow(wx.Frame, MosaicCommon):
             # have changed.
             try:
                 minVal, maxVal = cockpit.gui.camera.window.getCameraScaling(camera)
+                # HACK: If this is the first image being acquired the
+                # viewCanvas has not yet set the scaling.  Its default
+                # of [0 1] is unlikely to be appropriate for images
+                # that are likely uint8/16.  So wait a bit and read it
+                # again.  We should either be deciding the scaling
+                # ourselves, or get an image with associated scaling
+                # information or after the scaling information has
+                # been set.  See issue #718.
+                if (minVal == 0.0) and (maxVal == 1.0):
+                    time.sleep(0.1)
+                    minVal, maxVal = cockpit.gui.camera.window.getCameraScaling(camera)
             except Exception as e:
                 # Go to idle state.
                 self.shouldContinue.clear()
@@ -805,10 +786,10 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                     camera = cam
                     break
         # Get image size in microns.
-        objective = depot.getHandlersOfType(depot.OBJECTIVE)[0]
+        pixel_size = wx.GetApp().Objectives.GetPixelSize()
         width, height = camera.getImageSize()
-        width *= objective.getPixelSize()
-        height *= objective.getPixelSize()
+        width *= pixel_size
+        height *= pixel_size
         x, y, z = cockpit.interfaces.stageMover.getPosition()
         data = cockpit.gui.camera.window.getImageForCamera(camera)
         self.canvas.addImage(data, (-x +self.offset[0]- width / 2,
@@ -828,16 +809,6 @@ class MosaicWindow(wx.Frame, MosaicCommon):
         cockpit.util.userConfig.setValue('mosaicScaleBar',self.scalebar)
         self.Refresh()
 
-    def toggleDrawPrimitives(self):
-        #toggle the scale bar between 0 and 1.
-        if (self.drawPrimitives!=False):
-            self.drawPrimitives=False
-        else:
-            self.drawPrimitives = True
-        #store current state for future.
-        cockpit.util.userConfig.setValue('mosaicDrawPrimitives',
-                                         self.drawPrimitives)
-        self.Refresh()
     ## Save the current stage position as a new site with the specified
     # color (or our currently-selected color if none is provided).
     def saveSite(self, color = None):
@@ -851,7 +822,7 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                 cockpit.interfaces.stageMover.Site(position, None, color,
                         size = self.crosshairBoxSize))
         # Publish mosaic update event to update this and other views (e.g. touchscreen).
-        events.publish('mosaic update')
+        events.publish(events.MOSAIC_UPDATE)
 
 
     ## Set the site marker color.
@@ -869,10 +840,10 @@ class MosaicWindow(wx.Frame, MosaicCommon):
         menu = wx.Menu()
         for i, (label, color) in enumerate(SITE_COLORS):
             menu.Append(i + 1, "Mark sites in %s" % label)
-            self.panel.Bind(wx.EVT_MENU,
-                            lambda event, color = color: self.setSiteColor(color),
-                            id=i+1)
-        cockpit.gui.guiUtils.placeMenuAtMouse(self.panel, menu)
+            self.Bind(wx.EVT_MENU,
+                      lambda event, color = color: self.setSiteColor(color),
+                      id=i+1)
+        cockpit.gui.guiUtils.placeMenuAtMouse(self, menu)
 
 
     ## Calculate the focal plane of the sample.
@@ -896,7 +867,6 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                 p2 = positions[j] - center
                 for k in range(j + 1, len(positions)):
                     p3 = positions[k] - center
-                    points = numpy.rot90([p1, p2, p3])
                     # Calculate normal vector, and normalize
                     normal = numpy.cross(p2 - p1, p3 - p1)
                     magnitude = numpy.sqrt(sum(normal * normal))
@@ -944,7 +914,7 @@ class MosaicWindow(wx.Frame, MosaicCommon):
             siteID = int(text.split(':')[0])
             self.selectedSites.add(cockpit.interfaces.stageMover.getSite(siteID))
         # Refresh this and other mosaic views.
-        events.publish('mosaic update')
+        events.publish(events.MOSAIC_UPDATE)
 
 
     ## User double-clicked on a site in the sites box; go to that site.
@@ -1073,16 +1043,19 @@ class MosaicWindow(wx.Frame, MosaicCommon):
     # \param action Function to call with the selected camera as a parameter.
     def showCameraMenu(self, text, action):
         cameras = depot.getActiveCameras()
-        if len(cameras) == 1:
+        if len(cameras) == 0:
+            wx.MessageBox("Please enable a camera to run a mosaic.",
+                          caption="No cameras are enabled")
+        elif len(cameras) == 1:
             action(cameras[0])
         else:
             menu = wx.Menu()
             for i, camera in enumerate(cameras):
                 menu.Append(i + 1, text % camera.descriptiveName)
-                self.panel.Bind(wx.EVT_MENU,
-                                lambda event, camera = camera: action(camera),
-                                id=i+1)
-            cockpit.gui.guiUtils.placeMenuAtMouse(self.panel, menu)
+                self.Bind(wx.EVT_MENU,
+                          lambda event, camera = camera: action(camera),
+                          id=i+1)
+            cockpit.gui.guiUtils.placeMenuAtMouse(self, menu)
 
 
     ## Set the function to use when the user selects tiles.
@@ -1208,7 +1181,7 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                     if region.shape[0] < regionSize or region.shape[1] < regionSize:
                         continue
                     # Find connected components in data.
-                    labeled, numComponents = scipy.ndimage.measurements.label(region)
+                    numComponents = scipy.ndimage.measurements.label(region)[1]
                     if numComponents != 1:
                         # More than one bead visible, or no beads at all.
                         continue
@@ -1299,8 +1272,8 @@ class MosaicWindow(wx.Frame, MosaicCommon):
             bestIntensity = None
             for offset in numpy.arange(-1, 1.1, .1):
                 cockpit.interfaces.stageMover.goTo((x, y, z + offset), shouldBlock = True)
-                image, timestamp = events.executeAndWaitFor('new image %s' % camera.name,
-                        cockpit.interfaces.imager.takeImage, shouldBlock = True)
+                image, timestamp = events.executeAndWaitFor(events.NEW_IMAGE % camera.name,
+                        wx.GetApp().Imager.takeImage, shouldBlock = True)
                 if bestIntensity is None or image.max() > bestIntensity:
                     bestIntensity = image.max()
                     bestOffset = offset
@@ -1325,9 +1298,7 @@ window = None
 
 def makeWindow(parent):
     global window
-    window = MosaicWindow(parent, title = "Mosaic view",
-            style = wx.CAPTION | wx.MINIMIZE_BOX | wx.RESIZE_BORDER)
-    window.Show()
+    window = MosaicWindow(parent, title="Mosaic view")
     window.centerCanvas()
 
 

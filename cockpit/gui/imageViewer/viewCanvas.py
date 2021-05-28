@@ -51,18 +51,16 @@
 ## ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 ## POSSIBILITY OF SUCH DAMAGE.
 
-
 from cockpit import events
 import cockpit.gui
+import cockpit.gui.freetype
 import cockpit.gui.guiUtils
+import cockpit.gui.dialogs.getNumberDialog
+import cockpit.util.datadoc
 import cockpit.util.threads
 
-
-from wx.glcanvas import GLCanvas
 from collections.abc import Iterable
 
-
-from cockpit.util import ftgl
 import numpy
 from OpenGL.GL import *
 import numpy as np
@@ -72,6 +70,7 @@ import traceback
 import wx
 import wx.glcanvas
 import operator
+
 
 ## @package cockpit.gui.imageViewer.viewCanvas
 # This module provides a canvas for displaying camera images.
@@ -161,7 +160,7 @@ class Image(BaseGL):
     """
     def __init__(self):
         # Maximum texture edge size
-        self._maxTexEdge = glGetInteger(GL_MAX_TEXTURE_SIZE)
+        self._maxTexEdge = 0
         # Textures used to display this image.
         self._textures = []
         # New data flag
@@ -222,6 +221,7 @@ class Image(BaseGL):
         be called in the main thread."""
         if self._data is None:
             return
+        self._maxTexEdge = glGetInteger(GL_MAX_TEXTURE_SIZE)
         data = self._data
         glPixelStorei(GL_UNPACK_SWAP_BYTES, False)
         # Ensure the right number of textures available.
@@ -408,13 +408,24 @@ class Histogram(BaseGL):
 class ViewCanvas(wx.glcanvas.GLCanvas):
     ## Instantiate.
     def __init__(self, parent, *args, **kwargs):
-        wx.glcanvas.GLCanvas.__init__(self, parent, *args, **kwargs)
-
-        ## Parent, so we can adjust its size when we receive an image.
-        self.parent = parent
+        super().__init__(parent, *args, **kwargs)
 
         self.image = Image()
         self.histogram = Histogram()
+
+        ## Menu - keep reference to store state of toggle buttons.
+        # Must be created after self.image.
+        self._menu = wx.Menu()
+        for label, action in self.getMenuActions():
+            if not label:
+                self._menu.AppendSeparator()
+                continue
+            id = wx.NewIdRef()
+            if label.lower().startswith("toggle"):
+                self._menu.AppendCheckItem(id, label)
+            else:
+                self._menu.Append(id, label)
+            self.Bind(wx.EVT_MENU, lambda event, action=action: action(), id=id)
 
         # Canvas geometry - will be set by InitGL, or setSize.
         self.w, self.h = None, None
@@ -463,26 +474,31 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
         self.context = wx.glcanvas.GLContext(self)
 
         ## Font for text rendering
-        self.font = ftgl.TextureFont(cockpit.gui.FONT_PATH)
-        self.font.setFaceSize(18)
+        self.face = cockpit.gui.freetype.Face(self, 18)
 
         self.Bind(wx.EVT_PAINT, self.onPaint)
         # Do nothing, to prevent flickering
         self.Bind(wx.EVT_ERASE_BACKGROUND, lambda event: 0)
         self.Bind(wx.EVT_MOUSE_EVENTS, self.onMouse)
         self.Bind(wx.EVT_MOUSEWHEEL, self.onMouseWheel)
+        self.Bind(wx.EVT_DPI_CHANGED, self.onDPIchange)
         # Right click also creates context menu event, which will pass up
         # if unhandled. Bind it to None to prevent the main window
         # context menu being displayed after our own.
         self.Bind(wx.EVT_CONTEXT_MENU, lambda event: None)
         self.painting = False
 
+        # Initialise FFT variables
+        self.showFFT = False
 
+    def onDPIchange(self,event):
+        #rescale the glcanvas object if needed
+        self.w, self.h = self.GetClientSize()*self.GetContentScaleFactor()
 
     def onMouseWheel(self, event):
         # Only respond if event originated within window.
         p = event.GetPosition()
-        s = self.GetSize()
+        s = self.GetSize()*self.GetContentScaleFactor()
         if any(map(operator.or_, map(operator.gt, p, s), map(operator.lt, p, (0,0)))):
             return
         rotation = event.GetWheelRotation()
@@ -490,8 +506,8 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
             return
         factor = rotation / 1000.
         x, y = event.GetLogicalPosition(wx.ClientDC(self))
-        w, h = self.GetClientSize()
-        h -= HISTOGRAM_HEIGHT
+        w, h = self.GetClientSize()*self.GetContentScaleFactor()
+        h -= HISTOGRAM_HEIGHT*self.GetContentScaleFactor()
         glx = -(2 * (x / w) - 1) / self.zoom
         gly = (2 * (y / h) - 1) / self.zoom
         newZoom = self.zoom * (1 + factor)
@@ -505,7 +521,7 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
 
 
     def InitGL(self):
-        self.w, self.h = self.GetClientSize()
+        self.w, self.h = self.GetClientSize()*self.GetContentScaleFactor()
         self.SetCurrent(self.context)
         glClearColor(0.3, 0.3, 0.3, 0.0)   ## background color
 
@@ -555,12 +571,15 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
             shouldResetView = self.imageShape != newImage.shape
             self.imageShape = newImage.shape
             self.histogram.setData(newImage)
-            self.image.setData(newImage)
+            if self.showFFT:
+                self.image.setData(np.log(np.abs(np.fft.fftshift(np.fft.fft2(self.imageData))) + 1e-16))
+            else:
+                self.image.setData(newImage)
             if shouldResetView:
                 self.resetView()
             if isFirstImage:
                 self.image.autoscale()
-            self.Refresh()
+            wx.CallAfter(self.Refresh)
             # Wait for the image to be drawn before we do anything more.
             self.drawEvent.wait()
             self.drawEvent.clear()
@@ -601,16 +620,18 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
             return
 
         try:
+            Hist_Height=int(HISTOGRAM_HEIGHT*self.GetContentScaleFactor())
             self.painting = True
             self.SetCurrent(self.context)
             glClear(GL_COLOR_BUFFER_BIT)
-            glViewport(0, HISTOGRAM_HEIGHT, self.w, self.h - HISTOGRAM_HEIGHT)
+            glViewport(0, Hist_Height,
+                       self.w, self.h - Hist_Height)
             self.image.draw(pan=(self.panX, self.panY), zoom=self.zoom)
             if self.showCrosshair:
                 self.drawCrosshair()
 
 
-            glViewport(0, 0, self.w, HISTOGRAM_HEIGHT//2)
+            glViewport(0, 0, self.w, Hist_Height//2)
             self.histogram.draw()
             glColor(0, 1, 0, 1)
 
@@ -619,11 +640,12 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
             glPushMatrix()
             glLoadIdentity ()
             glOrtho (0, self.w, 0, self.h, 1., -1.)
-            glTranslatef(0, HISTOGRAM_HEIGHT/2+2, 0)
+            glTranslatef(0, (Hist_Height)/2+2, 0)
             try:
-                self.font.render('%d [%-10d %10d] %d' %
+                self.face.render('%d [%-10d %10d] %d' %
                                  (self.image.dmin, self.histogram.lthresh,
-                                  self.histogram.uthresh, self.image.dmin+self.image.dptp))
+                                  self.histogram.uthresh,
+                                  self.image.dmin+self.image.dptp))
             except:
                 pass
             glPopMatrix()
@@ -635,7 +657,7 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
             self.drawEvent.set()
         except Exception as e:
             print ("Error drawing view canvas:",e)
-            traceback.print_stack()
+            traceback.print_exc()
             #self.shouldDraw = False
         finally:
             self.painting = False
@@ -652,14 +674,15 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
     ## Update the size of the canvas by scaling it.
     def setSize(self, size):
         if self.imageData is not None:
-            self.w, self.h = size
+            self.w, self.h = size*self.GetContentScaleFactor()
         self.Refresh(0)
 
 
     def onMouse(self, event):
         if self.imageShape is None:
             return
-        self.curMouseX, self.curMouseY = event.GetPosition()
+        self.curMouseX, self.curMouseY = (event.GetPosition() *
+                                          self.GetContentScaleFactor())
         self.updateMouseInfo(self.curMouseX, self.curMouseY)
         if event.LeftDClick():
             # Explicitly skip EVT_LEFT_DCLICK for parent to handle.
@@ -671,7 +694,8 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
             blackPointX = 0.5 * (1+self.histogram.data2gl(self.histogram.lthresh)) * self.w
             whitePointX = 0.5 * (1+self.histogram.data2gl(self.histogram.uthresh)) * self.w
             # Set drag mode based on current window position
-            if self.h - self.curMouseY >= HISTOGRAM_HEIGHT * 2:
+            if self.h - self.curMouseY >= (HISTOGRAM_HEIGHT *
+                                           self.GetContentScaleFactor()* 2):
                 self.dragMode = DRAG_CANVAS
             elif abs(self.curMouseX - blackPointX) < abs(self.curMouseX - whitePointX):
                 self.dragMode = DRAG_BLACKPOINT
@@ -697,13 +721,7 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
             self.mouseDragX = self.curMouseX
             self.mouseDragY = self.curMouseY
         elif event.RightDown():
-            # Show a menu.
-            menu = wx.Menu()
-            for label, action in self.getMenuActions():
-                id = wx.NewIdRef()
-                menu.Append(id, label)
-                self.Bind(wx.EVT_MENU,  lambda event, action = action: action(), id= id)
-            cockpit.gui.guiUtils.placeMenuAtMouse(self, menu)
+            cockpit.gui.guiUtils.placeMenuAtMouse(self, self._menu)
         elif event.Entering() and self.TopLevelParent.IsActive():
             self.SetFocus()
         else:
@@ -718,8 +736,13 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
     def getMenuActions(self):
         return [('Reset view', self.resetView),
                 ('Set histogram parameters', self.onSetHistogram),
+                ('Toggle clip highlighting', self.image.toggleClipHighlight),
+                ('', None),
                 ('Toggle alignment crosshair', self.toggleCrosshair),
-                ('Toggle clip highlighting', self.image.toggleClipHighlight),]
+                ("Toggle FFT mode", self.toggleFFT),
+                ('', None),
+                ('Save image', self.saveData)
+                ]
 
 
     ## Let the user specify the blackpoint and whitepoint for image scaling.
@@ -738,10 +761,21 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
         self.showCrosshair = not(self.showCrosshair)
 
 
+    def toggleFFT(self, event=None):
+        if self.showFFT:
+            self.showFFT = False
+            self.image.setData(self.imageData)
+        else:
+            self.showFFT = True
+            self.image.setData(np.log(np.abs(np.fft.fftshift(np.fft.fft2(self.imageData))) + 1e-16))
+
+
     ## Convert window co-ordinates to gl co-ordinates.
     def canvasToGl(self, x, y):
         glx = (-1 + 2 *x / self.w - self.panX * self.zoom) / self.zoom
-        gly = -(-1 + 2 * y / (self.h - HISTOGRAM_HEIGHT) + self.panY * self.zoom) / self.zoom
+        gly = -(-1 + 2 * y / (self.h - (HISTOGRAM_HEIGHT*
+                                        self.GetContentScaleFactor()))
+                + self.panY * self.zoom) / self.zoom
         return (glx, gly)
 
 
@@ -749,7 +783,7 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
     # Note: pass in x,y, but returns row-major datay, datax
     def glToIndices(self, glx, gly):
         datax = (1 + glx) * self.imageShape[1] // 2
-        datay = (1 + gly) * self.imageShape[0] // 2
+        datay = self.imageShape[0]-((1 + gly) * self.imageShape[0] // 2)
         return (datay, datax)
 
 
@@ -796,3 +830,16 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
         self.image.autoscale()
         self.histogram.lthresh, self.histogram.uthresh = self.image.getDisplayRange()
         self.Refresh()
+
+    def saveData(self, evt=None):
+        with wx.FileDialog(self, "Save image", wildcard="DV files (*.dv)|*.dv",
+                           style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT) as fileDialog:
+            if fileDialog.ShowModal() != wx.ID_OK:
+                return
+            path = fileDialog.GetPath()
+        # TODO: add XYsize and wavelength to saved data. These can be passed as
+        # kwargs, but the way per-camera pixel sizes are handled needs to be
+        # addressed first. See issue #538.
+        if self.Parent.Parent.curCamera is not None:
+            wls = [self.Parent.Parent.curCamera.wavelength,]
+        cockpit.util.datadoc.writeDataAsMrc(self.imageData, path, wavelengths=wls)

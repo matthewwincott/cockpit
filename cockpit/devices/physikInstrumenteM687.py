@@ -50,34 +50,21 @@
 ## ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 ## POSSIBILITY OF SUCH DAMAGE.
 
-
 from cockpit import events
 import cockpit.gui.guiUtils
 import cockpit.handlers.stagePositioner
-from cockpit import interfaces
+import cockpit.interfaces.stageMover
 import cockpit.util.logger
 import cockpit.util.threads
 import cockpit.util.userConfig
 
-from . import stage
+from cockpit.devices.device import Device
 from OpenGL.GL import *
 import serial
 import threading
 import time
 import wx
 import re # to get regular expression parsing for config file
-
-## This module is for Physik Instrumente (PI) M687 XY stage.
-# Sample config entry:
-#  [m687]
-#  type: PhysikInstrumenteM687
-#  port: com6
-#  baud: 115200
-#  timeout: 0.1
-#  softlimits: ((-37500,-67500),(11500,59500))
-#  primitives:  r, 500, -7000 ,22000,76000
-#               c, 6500, -6200, 4500
-#
 
 LIMITS_PAT = r"(?P<limits>\(\s*\(\s*[-]?\d*\s*,\s*[-]?\d*\s*\)\s*,\s*\(\s*[-]?\d*\s*\,\s*[-]?\d*\s*\)\))"
 
@@ -118,12 +105,26 @@ BANNED_RECTANGLES = ()
 #)
 
 
+class PhysikInstrumenteM687(Device):
+    """Physik Instrumente (PI) M687 XY stage.
 
-class PhysikInstrumenteM687(stage.StageDevice):
+    Sample config entry:
+
+    .. code:: ini
+
+        [m687]
+        type: cockpit.devices.physikInstrumenteM687.PhysikInstrumenteM687
+        port: com6
+        baud: 115200
+        timeout: 0.1
+        softlimits: ((-37500,-67500),(11500,59500))
+
+    """
+
     _config_types = {'baud': int,
                      'timeout': float,}
     def __init__(self, name, config):
-        super(PhysikInstrumenteM687, self).__init__(name, config)
+        super().__init__(name, config)
         ## Connection to the XY stage controller (serial.Serial instance)
         self.xyConnection = None
         ## Lock around sending commands to the XY stage controller.
@@ -140,9 +141,6 @@ class PhysikInstrumenteM687(stage.StageDevice):
         ## Maps cockpit axis ordering to a +-1 multiplier to apply to motion,
         # since some of our axes are flipped.
         self.axisSignMapper = {0: -1, 1: 1}
-        ## Time of last action using the piezo; used for tracking if we should
-        # disable closed loop.
-        self.lastPiezoTime = time.time()
 
         ## If there is a config section for the m687, grab the config and
         # subscribe to events.
@@ -163,8 +161,7 @@ class PhysikInstrumenteM687(stage.StageDevice):
             print ("No softlimits section setting default limits")
             self.softlimits = ((-67500, 67500), (-42500, 42500))
 
-        events.subscribe('program exit', self.onExit)
-        events.subscribe('user abort', self.onAbort)
+        events.subscribe(events.USER_ABORT, self.onAbort)
         events.subscribe('macro stage xy draw', self.onMacroStagePaint)
         #events.subscribe('cockpit initialization complete', self.promptExerciseStage)
 
@@ -287,7 +284,7 @@ class PhysikInstrumenteM687(stage.StageDevice):
         busy_box.Show()
         while response != 0:
             # Request motion status
-            self.xyConnection.write(chr(5))
+            self.xyConnection.write(b'\x05')
             response = int(self.xyConnection.readline())
             busy_box.Pulse()
             time.sleep(0.2)
@@ -359,11 +356,8 @@ class PhysikInstrumenteM687(stage.StageDevice):
                     "%d PI mover" % axis, "%d stage motion" % axis, False,
                     {'moveAbsolute': self.moveXYAbsolute,
                          'moveRelative': self.moveXYRelative,
-                         'getPosition': self.getXYPosition,
-                         'setSafety': self.setXYSafety,
-                         'getPrimitives': self.getPrimitives},
-                    axis, [.1, .2, .5, 1, 2, 5, 10, 50, 100, 500, 1000, 5000], 3,
-                    (minPos, maxPos), (minPos, maxPos)))
+                         'getPosition': self.getXYPosition},
+                    axis, (minPos, maxPos), (minPos, maxPos)))
         return result
 
 
@@ -445,14 +439,12 @@ class PhysikInstrumenteM687(stage.StageDevice):
             if delta < 5.:
                 # No movement since last time; done moving.
                 for axis in [0, 1]:
-                    events.publish('stage stopped', '%d PI mover' % axis)
+                    events.publish(events.STAGE_STOPPED, '%d PI mover' % axis)
                 with self.xyLock:
                     self.xyMotionTargets = [None, None]
                 return
-            for axis, val in enumerate([x, y]):
-                events.publish('stage mover', '%d PI mover' % axis, axis,
-                        self.axisSignMapper[axis] * val)
-            curPosition = (x, y)
+            for axis in [0, 1]:
+                events.publish(events.STAGE_MOVER, axis)
             time.sleep(.01)
 
 
@@ -462,7 +454,7 @@ class PhysikInstrumenteM687(stage.StageDevice):
     def getXYPosition(self, axis = None, shouldUseCache = True):
         if not shouldUseCache:
             position = self.sendXYCommand(b'POS?', 2, False)
-            y, x, null = position.split(b'\n')
+            y, x = position.split(b'\n', maxsplit=2)[:2]
             # Positions are in millimeters, and we need microns.
             x = float(x.split(b'=')[1]) * 1000 * self.axisSignMapper[0]
             y = float(y.split(b'=')[1]) * 1000 * self.axisSignMapper[1]
@@ -470,10 +462,6 @@ class PhysikInstrumenteM687(stage.StageDevice):
         if axis is None:
             return self.xyPositionCache
         return self.xyPositionCache[axis]
-
-
-    def setXYSafety(self, axis, value, isMax):
-        pass
 
 
     def makeInitialPublications(self):

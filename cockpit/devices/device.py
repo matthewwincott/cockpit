@@ -50,11 +50,23 @@
 ## POSSIBILITY OF SUCH DAMAGE.
 
 
-## This serves as the base class for any Device subclass. Devices are as close
-# as MUI gets to speaking directly to hardware. Device implementation is 
-# largely left up to the client; this class simply provides a framework of 
-# stub functions that must be implemented. 
-class Device(object):
+class Device:
+    """Base class for Cockpit devices.
+
+    This serves as the base class for any Device subclass.  Devices
+    are as close as Cockpit gets to speaking directly to hardware.
+    Device implementation is largely left up to the client; this class
+    simply provides a framework of stub functions that must be
+    implemented.
+
+    Args:
+      name: name of the device.  In the depot configuration file this
+          is the name of the section where the device is declared.
+      config: map of the device configuration to their values as
+          strings.  This is the key/values read from the device
+          section on the depot configuration file.
+
+    """
     _config_types = {
         'port': int,
     }
@@ -66,9 +78,6 @@ class Device(object):
 
 
     def __init__(self, name='', config={}):
-        ## Set to False to disable this device. Disabled devices will not be 
-        # initialized on startup. 
-        self.isActive = True
         self.name = name
         self.config = config
         # Convert config strings to types specified on device class.
@@ -126,19 +135,5 @@ class Device(object):
     def finalizeInitialization(self):
         pass
 
-
-    ## Simple getter
-    def getIsActive(self):
-        return self.isActive
-
-
-    ## Debugging function: shutdown the device preparatory to reloading 
-    # the module it is contained in.
-    def shutdown(self):
-        raise RuntimeError("Device %s didn't implement its shutdown function" % str(self))
-
-
-    ## Debugging function: re-initialize the device with the specified list
-    # of handlers.
-    def initWithHandlers(self, handlers):
-        raise RuntimeError("Device %s didn't implement its initWithHandlers function" % str(self))
+    def onExit(self) -> None:
+        pass

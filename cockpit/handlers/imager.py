@@ -49,13 +49,8 @@
 ## ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 ## POSSIBILITY OF SUCH DAMAGE.
 
-
-import wx
-
 from cockpit import depot
-from . import deviceHandler
-
-from cockpit import events
+from cockpit.handlers import deviceHandler
 
 
 ## This handler represents any device that is capable of causing an image to 
@@ -66,9 +61,7 @@ class ImagerHandler(deviceHandler.DeviceHandler):
     ## callbacks should fill in the following functions:
     # - takeImage(): Cause an image to be collected.
     def __init__(self, name, groupName, callbacks):
-        deviceHandler.DeviceHandler.__init__(self, name, groupName, False, 
-                callbacks, depot.IMAGER)
-
+        super().__init__(name, groupName, False, callbacks, depot.IMAGER)
 
     def takeImage(self):
         self.callbacks['takeImage']()

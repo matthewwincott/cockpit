@@ -18,21 +18,17 @@
 ## You should have received a copy of the GNU General Public License
 ## along with Cockpit.  If not, see <http://www.gnu.org/licenses/>.
 
-
-""" Cockpit device for SRS SR470 shutter controller.
-
-This is a base shutter device with dummy methods for testing.
-
-"""
 import re
 from cockpit import depot
-from . import device
+from cockpit.devices import device
 from cockpit import events
 from cockpit.handlers.lightSource import LightHandler
 
+
 class ShutterDevice(device.Device):
+    """Base shutter device with dummy methods for testing."""
     def __init__(self, name, config={}):
-        device.Device.__init__(self, name, config)
+        super().__init__(name, config)
         lights = config.get('lights', None)
         if lights:
             self.lights = re.split('[,;: ]\s*', lights)
@@ -57,9 +53,9 @@ class ShutterDevice(device.Device):
 
 
     def performSubscriptions(self):
-            events.subscribe('prepare for experiment',
+            events.subscribe(events.PREPARE_FOR_EXPERIMENT,
                             self.onPrepareForExperiment)
-            events.subscribe('experiment complete',
+            events.subscribe(events.EXPERIMENT_COMPLETE,
                             self.onCleanupAfterExperiment)
             events.subscribe(events.LIGHT_SOURCE_ENABLE, self.onLightSourceEnable)
 

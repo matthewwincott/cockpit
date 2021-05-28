@@ -58,7 +58,7 @@ from cockpit import depot
 from cockpit import events
 import cockpit.gui.dialogs.enumerateSitesPanel
 from cockpit.gui import guiUtils
-from . import experimentConfigPanel
+from cockpit.gui.dialogs.experiment import experimentConfigPanel
 import cockpit.interfaces.stageMover
 import cockpit.util.userConfig
 import cockpit.util.threads
@@ -68,16 +68,19 @@ CONTROL_SIZE = (280, -1)
 ## Minimum size of text input fields.
 FIELD_SIZE = (70, -1)
 
+_FILENAME_TEMPLATE = "{date}-{time}_t{cycle}_p{site}.mrc"
+
+
 ## This class allows for configuring multi-site experiments.
 class MultiSiteExperimentDialog(wx.Dialog):
     def __init__(self, parent):
-        wx.Dialog.__init__(self, parent,
+        super().__init__(parent,
                 title = "OMX multi-site experiment",
                 style = wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
 
         ## Whether or not we should abort the current experiment.
         self.shouldAbort = False
-        events.subscribe('user abort', self.onAbort)
+        events.subscribe(events.USER_ABORT, self.onAbort)
         
         ## List of all light handlers.
         self.allLights = depot.getHandlersOfType(depot.LIGHT_TOGGLE)
@@ -224,8 +227,8 @@ class MultiSiteExperimentDialog(wx.Dialog):
         self.experimentPanel = experimentConfigPanel.ExperimentConfigPanel(
                 self.panel, resizeCallback = self.onExperimentPanelResize,
                 resetCallback = self.onExperimentPanelReset,
-                configKey = 'multiSiteExperimentPanel',
-                shouldShowFileControls = False)
+                configKey = 'multiSiteExperimentPanel')
+        self.experimentPanel.filepath_panel.SetTemplate(_FILENAME_TEMPLATE)
         self.panelSizer.Add(self.experimentPanel, 0,
                 wx.ALIGN_CENTER | wx.ALL, 5)
         self.experimentPanel.Hide()
@@ -235,17 +238,17 @@ class MultiSiteExperimentDialog(wx.Dialog):
         button = wx.Button(self.panel, -1, "Reset")
         button.SetToolTip(wx.ToolTip("Reload this window with all default values"))
         button.Bind(wx.EVT_BUTTON, self.onReset)
-        buttonSizer.Add(button, 0, wx.ALIGN_LEFT | wx.ALL, 5)
+        buttonSizer.Add(button, 0, wx.ALL, 5)
 
         buttonSizer.Add((1, 0), 1, wx.EXPAND)
 
         button = wx.Button(self.panel, wx.ID_CANCEL, "Cancel")
-        buttonSizer.Add(button, 0, wx.ALIGN_RIGHT | wx.ALL, 5)
+        buttonSizer.Add(button, 0, wx.ALL, 5)
         
         button = wx.Button(self.panel, wx.ID_OK, "Start")
         button.SetToolTip(wx.ToolTip("Start the experiment"))
         button.Bind(wx.EVT_BUTTON, self.onStart)
-        buttonSizer.Add(button, 0, wx.ALIGN_RIGHT | wx.ALL, 5)
+        buttonSizer.Add(button, 0, wx.ALL, 5)
 
         self.panelSizer.Add(buttonSizer, 0, wx.ALL, 5)
         self.panel.SetSizerAndFit(self.panelSizer)
@@ -265,6 +268,7 @@ class MultiSiteExperimentDialog(wx.Dialog):
     ## User checked/unchecked the "customize light frequencies" button.
     def onCustomizeLightFrequencies(self, event):
         self.lightFrequenciesPanel.Show(self.shouldCustomizeLightFrequencies.GetValue())
+        self.panel.Layout()
         self.panel.SetSizerAndFit(self.panelSizer)
         self.SetClientSize(self.panel.GetSize())
 
@@ -282,8 +286,8 @@ class MultiSiteExperimentDialog(wx.Dialog):
         self.experimentPanel = experimentConfigPanel.ExperimentConfigPanel(
                 self.panel, resizeCallback = self.onExperimentPanelResize,
                 resetCallback = self.onExperimentPanelReset,
-                configKey = 'multiSiteExperimentPanel',
-                shouldShowFileControls = False)
+                configKey = 'multiSiteExperimentPanel')
+        self.experimentPanel.filepath_panel.SetTemplate(_FILENAME_TEMPLATE)
         # Put the experiment panel back into the sizer immediately after
         # the button that shows/hides it.
         for i, item in enumerate(self.panelSizer.GetChildren()):
@@ -413,7 +417,7 @@ class MultiSiteExperimentDialog(wx.Dialog):
             handlers = depot.getHandlersOfType(depot.POWER_CONTROL)
             for handler in handlers:
                 handler.disable()
-        events.publish('update status light', 'device waiting', '')
+        events.publish(events.UPDATE_STATUS_LIGHT, 'device waiting', '')
 
 
     ## Select the appropriate light sources for this cycle.
@@ -436,8 +440,8 @@ class MultiSiteExperimentDialog(wx.Dialog):
 
     ## Go to the specified site and run our experiment on it.
     def imageSite(self, siteId, cycleNum, experimentStart):
-        events.publish('update status light', 'device waiting',
-                'Waiting for stage motion')
+        events.publish(events.UPDATE_STATUS_LIGHT, 'device waiting',
+                       'Waiting for stage motion')
         cockpit.interfaces.stageMover.waitForStop()
         cockpit.interfaces.stageMover.goToSite(siteId, shouldBlock = True)
         self.waitFor(float(self.delayBeforeImaging.GetValue()))
@@ -451,12 +455,14 @@ class MultiSiteExperimentDialog(wx.Dialog):
         except ValueError:
             # Not actually an int.
             pass
-        filename = "%s_t%03d_p%s_%s" % (
-                time.strftime('%Y%m%d-%H%M', experimentStart),
-                cycleNum, siteId, self.fileBase.GetValue())
-        self.experimentPanel.setFilename(filename)
+        self.experimentPanel.filepath_panel.UpdateFilename({
+            "date": time.strftime('%Y%m%d', experimentStart),
+            "time": time.strftime('%H%M', experimentStart),
+            "cycle": ("%03d" % cycleNum),
+            "site": siteId,
+        })
         start = time.time()
-        events.executeAndWaitFor('experiment complete',
+        events.executeAndWaitFor(events.EXPERIMENT_COMPLETE,
                 self.experimentPanel.runExperiment)
         print ("Imaging took %.2fs" % (time.time() - start))
 
@@ -480,9 +486,9 @@ class MultiSiteExperimentDialog(wx.Dialog):
                 # Advanced to a new second; update the status light.
                 displayMinutes = remaining // 60
                 displaySeconds = (remaining - displayMinutes * 60) // 1
-                events.publish('update status light', 'device waiting',
-                        'Waiting for %02d:%02d' % (displayMinutes, displaySeconds),
-                        (255, 255, 0))
+                events.publish(events.UPDATE_STATUS_LIGHT, 'device waiting',
+                               ('Waiting for %02d:%02d'
+                                % (displayMinutes, displaySeconds)))
             time.sleep(.25)
             curTime = time.time()
         return True

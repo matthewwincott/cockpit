@@ -49,8 +49,6 @@
 ## ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 ## POSSIBILITY OF SUCH DAMAGE.
 
-
-from cockpit import depot
 import cockpit.gui.guiUtils
 import cockpit.interfaces.stageMover
 import cockpit.util.userConfig
@@ -65,7 +63,7 @@ import numpy
 class GridSitesDialog(wx.Dialog):
     ## Create the dialog, and lay out its UI widgets. 
     def __init__(self, parent):
-        wx.Dialog.__init__(self, parent, -1, "Place a Grid of Sites")
+        super().__init__(parent, -1, "Place a Grid of Sites")
 
         ## Config-loaded settings for the form.
         self.settings = cockpit.util.userConfig.getValue('gridSitesDialog', default = {
@@ -127,8 +125,7 @@ class GridSitesDialog(wx.Dialog):
         imageWidth = float(self.imageWidth.GetValue())
         imageHeight = float(self.imageHeight.GetValue())
         markerSize = float(self.markerSize.GetValue())
-        objective = depot.getHandlersOfType(depot.OBJECTIVE)[0]
-        pixelSize = objective.getPixelSize()
+        pixelSize = wx.GetApp().Objectives.GetPixelSize()
 
         for xOffset in range(int(self.numColumns.GetValue())):
             xLoc = curLoc[0] - xOffset * pixelSize * imageWidth

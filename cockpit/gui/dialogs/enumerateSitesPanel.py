@@ -71,7 +71,7 @@ import wx
 class EnumerateSitesPanel(wx.Panel):
     def __init__(self, parent, label, id = -1, size = (200, -1),
                  minSize = (280, -1), defaultIsAllSites = True):
-        wx.Panel.__init__(self, parent, id)
+        super().__init__(parent, id)
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.sites = cockpit.gui.guiUtils.addLabeledInput(parent = self, 
                 sizer = sizer,
@@ -115,8 +115,8 @@ class EnumerateSitesPanel(wx.Panel):
                 if token.find('-') != -1:
                     first, last = token.split('-')
                     # These ranges are inclusive, so add 1 to last
-                    newIndices = range(int(first), int(last) + 1)
-                    newIndices = filter(cockpit.interfaces.stageMover.doesSiteExist, newIndices)
+                    newIndices = [i for i in range(int(first), int(last) + 1)
+                                  if cockpit.interfaces.stageMover.doesSiteExist(i)]
                     baseIndices.extend(newIndices)
                     baseFrequencies.extend([frequency] * len(newIndices))
                 elif cockpit.interfaces.stageMover.doesSiteExist(int(token)):

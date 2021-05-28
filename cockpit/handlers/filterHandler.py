@@ -18,14 +18,13 @@
 ## You should have received a copy of the GNU General Public License
 ## along with Cockpit.  If not, see <http://www.gnu.org/licenses/>.
 
-
-from . import deviceHandler
+from cockpit.handlers import deviceHandler
 from cockpit import depot
-from cockpit import events
 import cockpit.gui
 import wx
+import cockpit.util.threads
 
-class Filter(object):
+class Filter:
     """An individual filter."""
 
     def __init__(self, position, *args):
@@ -59,33 +58,24 @@ class Filter(object):
 class FilterHandler(deviceHandler.DeviceHandler):
     """A handler for emission and ND filter wheels."""
     def __init__(self, name, groupName, isEligibleForExperiments, callbacks, cameras, lights):
-        deviceHandler.DeviceHandler.__init__(self,
-                                             name, groupName,
-                                             isEligibleForExperiments,
-                                             callbacks,
-                                             depot.LIGHT_FILTER)
+        super().__init__(name, groupName, isEligibleForExperiments, callbacks,
+                         depot.LIGHT_FILTER)
         self.cameras = cameras or []
         self.lights = lights or []
         self.lastFilter = None
-
-        #subscribe to save and load setting calls to enabvle saving and
-        #loading of configurations.
-        events.subscribe('save exposure settings', self.onSaveSettings)
-        events.subscribe('load exposure settings', self.onLoadSettings)
 
     @property
     def filters(self):
         return self.callbacks['getFilters']()
 
-    ## Save our settings in the provided dict.
-    def onSaveSettings(self, settings):
-        settings[self.name] = self.currentFilter()
+    def onSaveSettings(self):
+        return self.callbacks['getPosition']()
 
-    ## Load our settings from the provided dict.
     def onLoadSettings(self, settings):
-        if self.name in settings:
-            self.setFilter(settings[self.name])
-
+        filters = self.callbacks['getFilters']()
+        for f in filters:
+            if f.position == settings:
+                self.setFilter(f)
 
     ### UI functions ####
     def makeSelector(self, parent):
@@ -116,7 +106,7 @@ class FilterHandler(deviceHandler.DeviceHandler):
             if f.position == position:
                 return f
 
-
+    @cockpit.util.threads.callInMainThread
     def updateAfterMove(self, *args):
         # Accept *args so that can be called directly as a Pyro callback
         # or an event handler.

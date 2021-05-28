@@ -49,9 +49,10 @@
 ## ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 ## POSSIBILITY OF SUCH DAMAGE.
 
+"""Standard Z stack experiment."""
 
-from . import actionTable
-from . import experiment
+from cockpit.experiment import actionTable
+from cockpit.experiment import experiment
 
 import decimal
 import math
