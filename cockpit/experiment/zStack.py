@@ -99,7 +99,7 @@ class ZStackExperiment(experiment.Experiment):
                     curTime += motionTime
                     table.addAction(curTime, self.zPositioner, zTarget)
                 curTime += stabilizationTime
-                prevAltitude = zTarget
+            prevAltitude = zTarget
             # Image the sample.
             for cameras, lightTimePairs in self.exposureSettings:
                 curTime = self.expose(curTime, cameras, lightTimePairs, table)
