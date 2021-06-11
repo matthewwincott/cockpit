@@ -100,7 +100,6 @@ class ZStackExperiment(experiment.Experiment):
                     table.addAction(curTime, self.zPositioner, zTarget)
                 curTime += stabilizationTime
                 prevAltitude = zTarget
-
             # Image the sample.
             for cameras, lightTimePairs in self.exposureSettings:
                 curTime = self.expose(curTime, cameras, lightTimePairs, table)
@@ -121,7 +120,6 @@ class ZStackExperiment(experiment.Experiment):
             # This works for analouge, the assumption is the remote does this
             # in digital triggering
             table.addAction(curTime, self.zPositioner, self.zStart)
-
         # Hold flat for the stabilization time, and any time needed for
         # the cameras to be ready. Only needed if we're doing multiple
         # reps, so we can proceed immediately to the next one.
