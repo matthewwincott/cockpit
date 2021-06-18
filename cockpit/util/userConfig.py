@@ -103,3 +103,9 @@ def initialize(cockpit_config):
     _config_path = os.path.join(cockpit_config['global'].get('config-dir'),
                                 'config.py')
     _config = _loadConfig(_config_path)
+
+def loadAdditionalConfig(fpath):
+    newconfigs=_loadConfig(fpath)
+    for key, value in newconfigs.items():
+        print (key,value)
+        setValue(key, value)
