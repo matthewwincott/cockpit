@@ -24,7 +24,9 @@
 import decimal
 import Pyro4
 import wx
-import time
+import dataclasses
+import collections.abc
+import typing
 
 from cockpit import depot
 import numpy as np
@@ -47,6 +49,21 @@ from microscope import TriggerMode, TriggerType
 (DEFAULTS_NONE, DEFAULTS_PENDING, DEFAULTS_SENT) = range(3)
 
 
+@dataclasses.dataclass
+class _PostProcessor:
+    """Encapsulation for all the data associated with post-processing units.
+
+    Args:
+        priority: priority of the post-processor
+        f_data: post-processor itself
+        f_shape: expected shape of the output data of the post-processor, in
+        the format (width, height).
+    """
+    priority: int
+    f_data: collections.abc.Callable[np.ndarray, np.ndarray]
+    f_shape: collections.abc.Callable[tuple[int, int], tuple[int, int]]
+
+
 class MicroscopeCamera(MicroscopeBase, CameraDevice):
     """A class to control remote python microscope cameras."""
     def __init__(self, name, config):
@@ -55,6 +72,7 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
         self.enabled = False
         self.panel = None
         self.modes = []
+        self._post_processors = []
 
     def initialize(self):
         # Parent class will connect to proxy
@@ -260,7 +278,7 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
 
     def getImageSize(self, name):
         """Read the image size from the camera."""
-        roi = self._proxy.get_roi()  # left, bottom, right, top
+        roi = self._proxy.get_roi()
         if not isinstance(roi, ROI):
             cockpit.util.logger.log.warning("%s returned tuple not ROI()" % self.name)
             roi = ROI(*roi)
@@ -268,7 +286,10 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
         if not isinstance(binning, Binning):
             cockpit.util.logger.log.warning("%s returned tuple not Binning()" % self.name)
             binning = Binning(*binning)
-        return (roi.width//binning.h, roi.height//binning.v)
+        size = (roi.width//binning.h, roi.height//binning.v)
+        for pp in self._post_processors:
+            size = pp.f_shape(size)
+        return size
 
 
     def getSavefileInfo(self, name):
@@ -303,6 +324,8 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
         """This function is called when data is received from the hardware."""
         (image, timestamp) = args
         if not isinstance(image, Exception):
+            for pp in self._post_processors:
+                image = pp.f_data(image)
             events.publish(events.NEW_IMAGE % self.name, image, timestamp)
         else:
             # Handle the dropped frame by publishing an empty image of the correct
@@ -381,3 +404,76 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
             return
         self.set_setting('readout mode', self.modes[index][0])
         self.updateSettings()
+
+    def addPostProcessor(
+        self,
+        priority: int,
+        f_data: collections.abc.Callable[np.ndarray, np.ndarray],
+        f_shape: collections.abc.Callable[tuple[int, int], tuple[int, int]]
+    ):
+        """Add a post-processing unit.
+
+        A post-processor must not change the pixel size of the data. This
+        means no scaling and other similar transformations. Because of the
+        way that data is saved, it is useful to know the expected shape in
+        advance and hence it is required from post-processors to define a
+        function to do so.
+
+        Multiple post-processors with the same priority will be used in the
+        order they were added.
+
+        Args:
+            priority: integer used to determine the order of the processing
+            units.
+            f_data: callable object used to process the image data; it should
+            take as an input a 2D numpy array of image data and return a 2D
+            numpy array with shape consistent with the f_shape argument.
+            f_shape: callable object used to calculate the expected data
+            shape of the output of the f_data argument; the format is (w, h).
+        """
+        self._post_processors.append(
+            _PostProcessor(priority, f_data, f_shape)
+        )
+        self._post_processors.sort(key=lambda x: x.priority)
+
+    def removePostProcessor(
+        self,
+        priority: int,
+        f_data: typing.Optional[
+            collections.abc.Callable[np.ndarray, np.ndarray]
+        ] = None,
+        f_shape: typing.Optional[
+            collections.abc.Callable[tuple[int, int], tuple[int, int]]
+        ] = None
+    ):
+        """Remove a post-processing unit.
+
+        The data and shape functions can be used to narrow down the selected
+        post-processor. The testing is done with a value comparison If
+        multiple post-processors match the searching criteria, e.g. identical
+        priority, then the selection is done by the order in which they were
+        added.
+
+        Args:
+            priority: the priority of the post-processor
+            f_data: the data processing function of the post-processor
+            f_shape: the shape calculation function of the post-processor
+        """
+        # Filter by priority
+        candidates = [
+            item
+            for item in self._post_processors
+            if item.priority == priority
+        ]
+        if f_data:
+            # Filter by data function
+            candidates = [item for item in candidates if item.f_data == f_data]
+        if f_shape:
+            # Filter by shape function
+            candidates = [
+                item
+                for item in candidates
+                if item.f_shape == f_shape
+            ]
+        # Remove the first candidate
+        self._post_processors.remove(candidates[0])
