@@ -219,7 +219,9 @@ class PhysikInstrumenteM687(Device):
     # user-input motion commands and end up moving further than expected.
     def sendXYCommand(self, command, numExpectedLines = 1, shouldCheckErrors = True):
         with self.xyLock:
-            self.xyConnection.write(command + b'\n')
+            if len(command) > 1:
+                command = command + b"\n"
+            self.xyConnection.write(command)
             response = self.getXYResponse(numExpectedLines)
             if shouldCheckErrors:
                 # Check for errors
@@ -373,7 +375,7 @@ class PhysikInstrumenteM687(Device):
         self.sendXYCommand(b'MOV %d %f' %
                 (self.axisMapper[axis],
                  self.axisSignMapper[axis] * pos / 1000.0))
-        self.sendXYPositionUpdates()
+        self.sendXYPositionUpdates(axis)
 
 
     def moveXYRelative(self, axis, delta):
@@ -430,22 +432,31 @@ class PhysikInstrumenteM687(Device):
 
     ## Send updates on the XY stage's position, until it stops moving.
     @cockpit.util.threads.callInNewThread
-    def sendXYPositionUpdates(self):
+    def sendXYPositionUpdates(self, axis_arg = None):
+        """Only possible in closed-loop operation (servo mode ON)."""
+        axes = [0, 1]
+        if axis_arg is not None:
+            axes = [axis_arg]
         while True:
-            prevX, prevY = self.xyPositionCache
-            x, y = self.getXYPosition(shouldUseCache = False)
-            delta = abs(x - prevX) + abs(y - prevY)
-            if delta < 5.:
-                # No movement since last time; done moving.
-                for axis in [0, 1]:
+            # Update position cache
+            self.getXYPosition(shouldUseCache = False)
+            # Query which axes are in motion
+            response = self.sendXYCommand(b"\x05", 1)
+            # Verify that all bits corresponding to our axes are set.
+            # The summing is equivalent to bitwise or of all the patterns
+            if int(response) & ~sum([1 << i for i in axes]) == 0:
+                # None of the axes are in motion => publish respective events
+                # and update the targets before returning
+                for axis in axes:
                     events.publish(events.STAGE_STOPPED, '%d PI mover' % axis)
-                with self.xyLock:
-                    self.xyMotionTargets = [None, None]
+                    with self.xyLock:
+                        self.xyMotionTargets[axis] = None
                 return
-            for axis in [0, 1]:
+            # The stage is still moving => publish respective events and wait
+            # a bit before moving to the next iteration
+            for axis in axes:
                 events.publish(events.STAGE_MOVER, axis)
-            time.sleep(.01)
-
+            time.sleep(0.01)
 
     ## Get the position of the specified axis, or both axes by default.
     # If shouldUseCache is not set, then we will query the controller, which
@@ -468,7 +479,7 @@ class PhysikInstrumenteM687(Device):
 
 
     ## Debugging function: extract all valid parameters from the XY controller.
-    def listXYParams(self):
+    def listXYParams(self, path):
         # Don't use sendXYCommand here because its error handling doesn't
         # deal with HPA?'s output properly -- there's an extra blank line
         # that makes it think output is done when it actually isn't.
@@ -480,7 +491,7 @@ class PhysikInstrumenteM687(Device):
             output = self.xyConnection.read(100)
             lines += output
         lines = lines.split(b'\n')
-        handle = open('params.txt', 'w')
+        handle = open(path, 'wb')
         for line in lines:
             if b'0x' in line:
                 # Parameter line
@@ -489,7 +500,7 @@ class PhysikInstrumenteM687(Device):
                 for axis in (1, 2):
                     val = self.sendXYCommand(b'SPA? %d %s' % (axis, param))
                     # Note val has a newline at the end here.
-                    handle.write("%s (%s): %s" % (desc, param, val.decode()))
+                    handle.write(b"%s (%s): %s" % (desc, param, val))
             else:
                 # Lines at the beginning/end don't have parameters in them.
                 handle.write(line)
