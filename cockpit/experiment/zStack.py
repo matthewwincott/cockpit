@@ -94,10 +94,8 @@ class ZStackExperiment(experiment.Experiment):
             else:
                 if prevAltitude is not None:
                     motionTime, stabilizationTime = self.zPositioner.getMovementTime(prevAltitude, zTarget)
-                    # digitial Z stack devices should add a pulse here and not
-                    #an analogue voltage, but not on first loop
-                    curTime += motionTime
-                    table.addAction(curTime, self.zPositioner, zTarget)
+                curTime += motionTime
+                table.addAction(curTime, self.zPositioner, zTarget)
                 curTime += stabilizationTime
             prevAltitude = zTarget
             # Image the sample.
@@ -132,6 +130,16 @@ class ZStackExperiment(experiment.Experiment):
         if(not self.zPositioner.digital):
             table.addAction(max(curTime + stabilizationTime, cameraReadyTime),
                             self.zPositioner, self.zStart)
+        else:
+            # Even in the case of a digital stage, there is still the need to
+            # wait for the camera to be ready or for the stage to stabilise
+            # before starting the next rep => insert a wait state, ensuring
+            # that the stage is not really triggered
+            table.addAction(
+                max(curTime + stabilizationTime, cameraReadyTime),
+                self.zPositioner,
+                False
+            )
 
         return table
 
