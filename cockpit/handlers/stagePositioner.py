@@ -163,10 +163,10 @@ class PositionerHandler(deviceHandler.DeviceHandler):
             return self.getDeltaMovementTime(end - start)
         raise RuntimeError("Called getMovementTime on non-experiment-eligible positioner [%s]" % self.name)
 
-    def setupDigitalStack(self, zStart,sliceHeight,numSlices):
+    def setupDigitalStack(self, zStart, sliceHeight, numSlices, numReps):
         if self.digital:
             return self.callbacks['setupDigitalStack'](zStart,sliceHeight,
-                                                        numSlices)
+                                                        numSlices, numReps)
         else:
             return 
 

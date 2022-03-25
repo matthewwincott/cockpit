@@ -76,9 +76,9 @@ class ZStackExperiment(experiment.Experiment):
             numZSlices += 1
         if (self.zPositioner.digital):
             #call the zPositioner to setup the digital Z stack.
-            stack=self.zPositioner.setupDigitalStack(self.zStart,self.sliceHeight,
-                                          numZSlices)
-           
+            self.zPositioner.setupDigitalStack(self.zStart,self.sliceHeight,
+                                          numZSlices, self.numReps)
+
         for zIndex in range(numZSlices):
             # Move to the next position, then wait for the stage to 
             # stabilize.
