@@ -168,7 +168,14 @@ class PositionerHandler(deviceHandler.DeviceHandler):
             return self.callbacks['setupDigitalStack'](zStart,sliceHeight,
                                                         numSlices, numReps)
         else:
-            return 
+            return
+
+    def flushDigitalStack(self):
+        return self.callbacks["flushDigitalStack"]()
+
+    def cleanupAfterExperiment(self, isCleanupFinal = True):
+        if self.digital and isCleanupFinal:
+            self.flushDigitalStack()
 
     @cached
     def getDeltaMovementTime(self, delta):
