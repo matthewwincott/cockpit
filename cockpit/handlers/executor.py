@@ -118,7 +118,8 @@ class ExecutorHandler(DeviceHandler):
         count = 0
         for time, handler, parameter in table[index:]:
             # Check for analog and digital devices we control.
-            if (handler is not self and
+            if (handler is not None and
+                   handler is not self and
                    handler not in self.digitalClients and
                    handler not in self.analogClients):
                 # Found a device we don't control.
