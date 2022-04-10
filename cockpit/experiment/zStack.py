@@ -74,29 +74,22 @@ class ZStackExperiment(experiment.Experiment):
             # Non-2D experiment; tack on an extra image to hit the top of
             # the volume.
             numZSlices += 1
-        if (self.zPositioner.digital):
+        if self.zPositioner.digital:
             #call the zPositioner to setup the digital Z stack.
             self.zPositioner.setupDigitalStack(self.zStart,self.sliceHeight,
                                           numZSlices, self.numReps)
 
         for zIndex in range(numZSlices):
-            # Move to the next position, then wait for the stage to 
-            # stabilize.
-            #find if this is a digital axis
+            # Move to the next position, then wait for the stage to stabilise.
             zTarget = self.zStart + self.sliceHeight * zIndex
-            motionTime, stabilizationTime = 0, 0
-            if(self.zPositioner.digital):
-                motionTime, stabilizationTime = self.zPositioner.getMovementTime(0, zTarget)
-                table.addToggle(curTime, self.zPositioner)
-                if prevAltitude is None:
-                    #first movement is likely large allow to settle.
-                    curTime += motionTime*10
-            else:
-                if prevAltitude is not None:
-                    motionTime, stabilizationTime = self.zPositioner.getMovementTime(prevAltitude, zTarget)
-                curTime += motionTime
-                table.addAction(curTime, self.zPositioner, zTarget)
-                curTime += stabilizationTime
+            if prevAltitude is not None:
+                motionTime, stabilizationTime = self.zPositioner.getMovementTime(
+                    prevAltitude, zTarget)
+                if self.zPositioner.digital:
+                    table.addToggle(curTime, self.zPositioner)
+                else:
+                    table.addAction(curTime, self.zPositioner, zTarget)
+                curTime += motionTime + stabilizationTime
             prevAltitude = zTarget
             # Image the sample.
             for cameras, lightTimePairs in self.exposureSettings:
@@ -104,42 +97,23 @@ class ZStackExperiment(experiment.Experiment):
                 # Advance the time very slightly so that all exposures
                 # are strictly ordered.
                 curTime += decimal.Decimal('1e-10')
-            # Hold the Z motion flat during the exposure.
-            # only needed in analouge signals
-            if(not self.zPositioner.digital):
-                table.addAction(curTime, self.zPositioner, zTarget)
 
-        # Move back to the start so we're ready for the next rep.
-        motionTime, stabilizationTime = self.zPositioner.getMovementTime(
-                self.zHeight, 0)
-        curTime += motionTime
-        
-        if(not self.zPositioner.digital):
-            # This works for analouge, the assumption is the remote does this
-            # in digital triggering
-            table.addAction(curTime, self.zPositioner, self.zStart)
-        # Hold flat for the stabilization time, and any time needed for
-        # the cameras to be ready. Only needed if we're doing multiple
-        # reps, so we can proceed immediately to the next one.
-        cameraReadyTime = 0
         if self.numReps > 1:
+            # Move to the start position in anticipation for next repetition
+            motionTime, stabilizationTime = self.zPositioner.getMovementTime(
+                self.zHeight, self.zStart)
+            if self.zPositioner.digital:
+                table.addToggle(curTime, self.zPositioner)
+            else:
+                table.addAction(curTime, self.zPositioner, self.zStart)
+            curTime += motionTime + stabilizationTime
+            # Wait for all cameras to be ready before starting the next repetition
+            cameraReadyTime = 0
             for cameras, lightTimePairs in self.exposureSettings:
                 for camera in cameras:
                     cameraReadyTime = max(cameraReadyTime,
                             self.getTimeWhenCameraCanExpose(table, camera))
-        if(not self.zPositioner.digital):
-            table.addAction(max(curTime + stabilizationTime, cameraReadyTime),
-                            self.zPositioner, self.zStart)
-        else:
-            # Even in the case of a digital stage, there is still the need to
-            # wait for the camera to be ready or for the stage to stabilise
-            # before starting the next rep => insert a wait state, ensuring
-            # that the stage is not really triggered
-            table.addAction(
-                max(curTime + stabilizationTime, cameraReadyTime),
-                self.zPositioner,
-                False
-            )
+            table.addAction(max(curTime, cameraReadyTime), None, None)
 
         return table
 
