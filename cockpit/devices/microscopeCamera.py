@@ -24,6 +24,7 @@
 import decimal
 import Pyro4
 import wx
+import time
 
 from cockpit import depot
 import numpy as np
@@ -114,7 +115,10 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
 
 
     def cleanupAfterExperiment(self):
-        """Restore settings as they were prior to experiment."""
+        """Clean-up actions after an experiment has ended."""
+        # Ensure the camera is ready to expose
+        time.sleep(self.getTimeBetweenExposures(self.name) / 1000)
+        # Restore settings as they were prior to experiment.
         if self.enabled:
             self.updateSettings(self.cached_settings)
             #self._proxy.update_settings(self.settings)
