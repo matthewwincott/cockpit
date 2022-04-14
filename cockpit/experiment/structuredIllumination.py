@@ -219,84 +219,84 @@ class SIExperiment(experiment.Experiment):
                     yield (angle, phase, self.zStart + z * self.sliceHeight)
 
 
+    def prepareHandlers(self):
+        super().prepareHandlers()
+        # Set initial angle and phase, if relevant. We assume the SLM (if any)
+        # is already showing the correct pattern for the first image set.
+        if self.angleHandler is not None:
+            angle = self.angleHandler.indexedPosition(0)
+            self.angleHandler.moveAbsolute(angle)
+        if self.phaseHandler is not None:
+            phase = self.phaseHandler.indexedPosition(0)
+            self.phaseHandler.moveAbsolute(phase)
+
     ## Create the ActionTable needed to run the experiment. We do three
     # Z-stacks for three different angles, and take five images at each
     # Z-slice, one for each phase.
     def generateActions(self):
         table = actionTable.ActionTable()
         curTime = 0
-        prevAngle, prevZ, prevPhase = None, None, None
+        prevAngleIndex, prevZ, prevPhaseIndex = None, None, None
 
-        # Set initial angle and phase, if relevant. We assume the SLM (if any)
-        # is already showing the correct pattern for the first image set.
-        # Increment the time slightly after each "motion" so that actions are well-ordered.
-        if self.angleHandler is not None:
-            theta = self.angleHandler.indexedPosition(0)
-            table.addAction(curTime, self.angleHandler, theta)
-            curTime += decimal.Decimal('1e-6')
-        if self.phaseHandler is not None:
-            table.addAction(curTime, self.phaseHandler, 0)
-            curTime += decimal.Decimal('1')
-        table.addAction(curTime, self.zPositioner, self.zStart)
-        curTime += decimal.Decimal('1')
+        # Setup the digital stack for digital Z positioners
+        if self.zPositioner.digital:
+            self.zPositioner.setupDigitalStack(
+                self.zStart,
+                self.sliceHeight,
+                self.numZSlices,
+                self.numReps
+            )
 
-        if self.slmHandler is not None:
-            # Add a first trigger of the SLM to get first new image.
-            table.addAction(curTime, self.slmHandler, 0)
-            # Wait a few ms for any necessary SLM triggers.
-            curTime = decimal.Decimal('5e-3')
-
-        for angle, phase, z in self.genSIPositions():
+        for angle_index, phase_index, z in self.genSIPositions():
             delayBeforeImaging = 0
-            # Figure out which positions changed. They need to be held flat
-            # up until the move, then spend some amount of time moving,
-            # then have some time to stabilize. Or, if we have an SLM, then we
-            # need to trigger it and then wait for it to stabilize.
-            # Ensure we truly are doing this after all exposure events are done.
-            curTime = max(curTime,
-                          table.getFirstAndLastActionTimes()[1] + decimal.Decimal('1e-6'))
-            if angle != prevAngle and prevAngle is not None:
-                if self.angleHandler is not None:
-                    theta = self.angleHandler.indexedPosition(angle)
-                    motionTime, stabilizationTime = self.angleHandler.getMovementTime(prevAngle, theta)
-                    # Move to the next position.
-                    table.addAction(curTime + motionTime, self.angleHandler, theta)
-                    delayBeforeImaging = max(delayBeforeImaging, 
-                            motionTime + stabilizationTime)
-                # Advance time slightly so all actions are sorted (e.g. we
-                # don't try to change angle and phase in the same timestep).
+            # Advance time slightly for all following actions, so that they
+            # are sorted (e.g. we don't try to change angle and phase in the
+            # same timestep).
+            if (
+                self.angleHandler is not None
+                and angle_index > 0
+                and angle_index != prevAngleIndex
+            ):
+                angle_prev = self.angleHandler.indexedPosition(prevAngleIndex)
+                angle = self.angleHandler.indexedPosition(angle_index)
+                delay = sum(
+                    self.angleHandler.getMovementTime(angle_prev, angle)
+                )
+                # Move to the next position.
+                table.addAction(curTime, self.angleHandler, angle)
+                delayBeforeImaging = max(delayBeforeImaging, delay)
+                # Sorting delay
+                curTime += decimal.Decimal(".001")
+            
+            if (
+                self.phaseHandler is not None
+                and phase_index > 0
+                and phase_index != prevPhaseIndex
+            ):
+                phase_prev = self.phaseHandler.indexedPosition(prevPhaseIndex)
+                phase = self.phaseHandler.indexedPosition(phase_index)
+                delay = sum(
+                    self.phaseHandler.getMovementTime(phase_prev, phase)
+                )
+                # Move to the next position.
+                table.addAction(curTime, self.phaseHandler, phase)
+                delayBeforeImaging = max(delayBeforeImaging, delay)
+                # Sorting delay
+                curTime += decimal.Decimal(".001")
+
+            if prevZ is not None and z != prevZ:
+                delay = sum(self.zPositioner.getMovementTime(prevZ, z))
+                # Move to the next position.
+                if self.zPositioner.digital:
+                    table.addToggle(curTime, self.zPositioner)
+                else:
+                    table.addAction(curTime, self.zPositioner, z)
+                delayBeforeImaging = max(delayBeforeImaging, delay)
+                # Sorting delay
                 curTime += decimal.Decimal('.001')
 
-            if phase != prevPhase and prevPhase is not None:
-                if self.phaseHandler is not None:
-                    motionTime, stabilizationTime = self.phaseHandler.getMovementTime(prevPhase, phase)
-                    # Hold flat.
-                    table.addAction(curTime, self.phaseHandler, prevPhase)
-                    # Move to the next position.
-                    table.addAction(curTime + motionTime,
-                            self.phaseHandler, phase)
-                    delayBeforeImaging = max(delayBeforeImaging,
-                            motionTime + stabilizationTime)
-                # Advance time slightly so all actions are sorted (e.g. we
-                # don't try to change angle and phase in the same timestep).
-                curTime += decimal.Decimal('.001')
-
-            if z != prevZ:
-                if prevZ is not None:
-                    motionTime, stabilizationTime = self.zPositioner.getMovementTime(prevZ, z)
-                    # Hold flat.
-                    table.addAction(curTime, self.zPositioner, prevZ)
-                    # Move to the next position.
-                    table.addAction(curTime + motionTime,
-                            self.zPositioner, z)
-                    delayBeforeImaging = max(delayBeforeImaging,
-                            motionTime + stabilizationTime)
-                # Advance time slightly so all actions are sorted (e.g. we
-                # don't try to change angle and phase in the same timestep).
-                curTime += decimal.Decimal('.001')
-
-            prevAngle = angle
-            prevPhase = phase
+            prevAngleIndex = angle_index
+            prevPhaseIndex = phase_index
             prevZ = z
 
             curTime += delayBeforeImaging
@@ -306,42 +306,91 @@ class SIExperiment(experiment.Experiment):
             # in a series of exposures at different wavelengths, with the SIM
             # pattern optimised for each wavelength.
             for cameras, lightTimePairs in self.exposureSettings:
-                curTime = self.expose(curTime, cameras, lightTimePairs, angle, phase, table)
+                curTime = self.expose(curTime, cameras, lightTimePairs, angle_index, phase_index, table)
 
-        # Hold Z, angle, and phase steady through to the end, then ramp down
-        # to 0 to prep for the next experiment.
-        table.addAction(curTime, self.zPositioner, prevZ)
-        motionTime, stabilizationTime = self.zPositioner.getMovementTime(
-                self.zHeight, self.zStart)
-        table.addAction(curTime + motionTime, self.zPositioner, self.zStart)
-        finalWaitTime = motionTime + stabilizationTime
-
-        # Ramp down Z
-        table.addAction(curTime + finalWaitTime, self.zPositioner, self.zStart)
-
-        if self.angleHandler is not None:
-            # Ramp down angle
-            theta = self.angleHandler.indexedPosition(0)
-            motionTime, stabilizationTime = self.angleHandler.getMovementTime(
-                    prevAngle, theta)
-            table.addAction(curTime + motionTime, self.angleHandler, theta)
-            finalWaitTime = max(finalWaitTime, motionTime + stabilizationTime)
-        if self.phaseHandler is not None:
-            # Ramp down phase
-            table.addAction(curTime, self.phaseHandler, prevPhase)
-            motionTime, stabilizationTime = self.phaseHandler.getMovementTime(
-                    prevPhase, 0)
-            table.addAction(curTime + motionTime, self.phaseHandler, 0)
-            finalWaitTime = max(finalWaitTime, motionTime + stabilizationTime)
-        if self.polarizerHandler is not None:
-            # Return to idle voltage.
-            table.addAction(curTime, self.polarizerHandler, (0, 'default'))
-            finalWaitTime = finalWaitTime + decimal.Decimal(1e-6)
-
-        # Set SLM back to 0th image ready for next measurement in timelapse or multi-site.
-        if self.slmHandler is not None:
-            # Toggle the slmHandler's digital line handler to advance one frame.
-            table.addToggle(curTime, self.slmHandler)
+        if self.numReps > 1:
+            wait_times = []
+            order_delay = decimal.Decimal('.001')
+            # Move to the start position in anticipation for next repetition
+            if self.zPositioner.digital:
+                table.addToggle(curTime + order_delay, self.zPositioner)
+            else:
+                table.addAction(
+                    curTime + order_delay,
+                    self.zPositioner,
+                    self.zStart
+                )
+            order_delay += order_delay
+            wait_times.append(
+                sum(
+                    self.zPositioner.getMovementTime(self.zHeight, self.zStart)
+                )
+            )
+            # Move to starting angle
+            if self.angleHandler is not None:
+                angle_prev = self.angleHandler.indexedPosition(prevAngleIndex)
+                angle = self.angleHandler.indexedPosition(0)
+                table.addAction(curTime + order_delay, self.angleHandler, angle)
+                order_delay += order_delay
+                wait_times.append(
+                    sum(self.angleHandler.getMovementTime(angle_prev, angle))
+                )
+            # Move to starting phase
+            if self.phaseHandler is not None:
+                phase_prev = self.phaseHandler.indexedPosition(prevPhaseIndex)
+                phase = self.phaseHandler.indexedPosition(0)
+                table.addAction(curTime + order_delay, self.angleHandler, angle)
+                order_delay += order_delay
+                wait_times.append(
+                    sum(self.angleHandler.getMovementTime(angle_prev, angle))
+                )
+            # Move to default polariser position
+            if self.polarizerHandler is not None:
+                longestWavelength = 0
+                for _, lightTimePairs in self.exposureSettings:
+                    for light, _ in lightTimePairs:
+                        longestWavelength = max(
+                            longestWavelength,
+                            light.wavelength
+                        )
+                angle_prev = self.polarizerHandler.indexedPosition(
+                    prevAngleIndex,
+                    longestWavelength
+                )
+                angle = self.polarizerHandler.indexedPosition(
+                    0,
+                    longestWavelength
+                )
+                table.addAction(
+                    curTime + order_delay,
+                    self.polarizerHandler,
+                    (angle_index, longestWavelength)
+                )
+                order_delay += order_delay
+                wait_times.append(
+                    sum(
+                        self.polarizerHandler.getMovementTime(
+                            angle_prev,
+                            angle
+                        )
+                    )
+                )
+            # Move the SLM back to first image
+            if self.slmHandler is not None:
+                table.addToggle(curTime + order_delay, self.slmHandler)
+                order_delay += order_delay
+                wait_times.append(self.slmHandler.getMovementTime())
+            # Ensure the cameras are ready to expose by adding a wait state
+            cameraReadyTime = 0
+            for cameras, _ in self.exposureSettings:
+                for camera in cameras:
+                    cameraReadyTime = max(cameraReadyTime,
+                            self.getTimeWhenCameraCanExpose(table, camera))
+            table.addAction(
+                max(curTime + order_delay + max(wait_times), cameraReadyTime),
+                None,
+                None
+            )
 
         return table
 
