@@ -415,7 +415,9 @@ class SIExperiment(experiment.Experiment):
             # Bleaching compensation
             tExpNew = tExp * (1 + decimal.Decimal(self.handlerToBleachCompensation[light]) * angle)
             newPairs.append((light, tExpNew))
-        longestWavelength = max(wavelengths)
+        longestWavelength = 0.0
+        if wavelengths:
+            longestWavelength = max(wavelengths)
         # Pre-exposure delay due to polarizer and SLM settling times.
         delay = decimal.Decimal(0.)
         # Set polarizer position
