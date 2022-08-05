@@ -300,9 +300,6 @@ class Experiment:
         # TODO: Handling multiple movers on an axis is broken. Do not proceed if
         # anything but the innermost Z mover is selected. Needs a proper fix.
         # IMD:- Further hack to allow piezo and remotez on deepsim
-        if (cockpit.interfaces.stageMover.mover.curHandlerIndex == 0):
-            wx.MessageBox("Wrong axis mover selected.")
-            raise Exception("Wrong axis mover selected.")
         # Prepare our position.
         cockpit.interfaces.stageMover.goToZ(self.altBottom, shouldBlock = True)
         self.zStart = cockpit.interfaces.stageMover.getAllPositions()[cockpit.interfaces.stageMover.mover.curHandlerIndex][-1]
