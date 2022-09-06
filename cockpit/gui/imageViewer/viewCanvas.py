@@ -463,9 +463,10 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
         self.panY = 0
 
         ## ROI
-        self.roi = None
-        self.definingROI = False    # Are we defining the ROI
-        # self.showROI = False        # Should we draw the ROI
+        self.roi = None                 # Current roi
+        self.roi_drag = None            # ROI currently being defined
+        self.definingROI = False        # Are we defining the ROI
+        self.showROI = False            # Should we draw the ROI
 
         ## What kind of dragging we're doing.
         self.dragMode = DRAG_NONE
@@ -632,7 +633,7 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
             self.image.draw(pan=(self.panX, self.panY), zoom=self.zoom)
             if self.showCrosshair:
                 self.drawCrosshair()
-            if self.definingROI:
+            if self.showROI:
                 self.drawROI()
 
             glViewport(0, 0, self.w, Hist_Height//2)
@@ -676,14 +677,14 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
 
     @cockpit.util.threads.callInMainThread
     def drawROI(self):
-        if self.roi:
+        if self.roi_drag:
             glColor3f(255, 0, 0)
             
             # Get raw gl co-ordinates
-            v = [self.indicesToGl(self.roi[1], self.roi[0]),
-                self.indicesToGl(self.roi[1] + self.roi[3], self.roi[0]),
-                self.indicesToGl(self.roi[1] + self.roi[3], self.roi[0] + self.roi[2]),
-                self.indicesToGl(self.roi[1], self.roi[0] + self.roi[2])
+            v = [self.indicesToGl(self.roi_drag[1], self.roi_drag[0]),
+                self.indicesToGl(self.roi_drag[1] + self.roi_drag[3], self.roi_drag[0]),
+                self.indicesToGl(self.roi_drag[1] + self.roi_drag[3], self.roi_drag[0] + self.roi_drag[2]),
+                self.indicesToGl(self.roi_drag[1], self.roi_drag[0] + self.roi_drag[2])
                 ]
 
             # Correct co-ordinates for zoom and pan
@@ -745,18 +746,22 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
                     self.histogram.uthresh = threshold
                     self.image.vmax = threshold
             elif self.dragMode == DRAG_ROI:
+                # Get co-ordinates in canvas units
                 coords_x = [self.mouseDragX, self.mouseLdownX]
                 coords_y = [self.mouseDragY, self.mouseLdownY]
                 roi_xmin, roi_ymin = min(coords_x), min(coords_y)
                 roi_xmax, roi_ymax = max(coords_x), max(coords_y)
-                
+
+                # Convert to data indices           
                 roi_min_ind = self.canvasToIndices(roi_xmin, roi_ymin)
                 roi_max_ind = self.canvasToIndices(roi_xmax, roi_ymax)
 
-                roi_size = (roi_max_ind[0] - roi_min_ind[0], roi_max_ind[1] - roi_min_ind[1])
+                # Get size of roi
+                roi_maxsize = max((roi_max_ind[0] - roi_min_ind[0], roi_max_ind[1] - roi_min_ind[1]))
+                roi_size = (roi_maxsize, roi_maxsize)
 
                 # Set roi (left, top, width, height)
-                self.roi = (roi_min_ind[1], roi_min_ind[0], roi_size[1], roi_size[0]) 
+                self.roi_drag = (roi_min_ind[1], roi_min_ind[0], roi_size[1], roi_size[0]) 
 
             self.mouseDragX = self.curMouseX
             self.mouseDragY = self.curMouseY
@@ -764,9 +769,16 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
             cockpit.gui.guiUtils.placeMenuAtMouse(self, self._menu)
         elif event.LeftUp():
             if self.definingROI:
-                camera = self.Parent.Parent.curCamera
-                camera.setROI(self.roi)
+                # Set ROI in camera, correcting for current roi
+                if self.roi:
+                    roi = (self.roi_drag[0] + self.roi[0], self.roi_drag[1] + self.roi[1], self.roi_drag[2], self.roi_drag[3])
+                else:
+                    roi = self.roi_drag
+
+                self.setROI(roi)
+
                 self.definingROI = False
+
         elif event.Entering() and self.TopLevelParent.IsActive():
             self.SetFocus()
         else:
@@ -805,13 +817,31 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
         self.Refresh()
 
     def onDefineROI(self, event = None):
-        self.roi = None
+        self.roi_drag = None
         self.definingROI = True
+        self.showROI = True
 
     def onClearROI(self, event = None):
-        camera = self.Parent.Parent.curCamera
+        camera = self.getCurrentCamera()
         sensor_shape = camera.getSensorShape()
-        camera.setROI((0,0,sensor_shape[0], sensor_shape[1]))
+        roi = (0, 0, sensor_shape[0], sensor_shape[1])
+        self.setROI(roi)
+        self.showROI = False
+
+    def setROI(self, roi):
+        # Set the camera roi
+        camera = self.getCurrentCamera()
+        camera.setROI(roi)
+
+        # Subscribe to next camera image to sync roi
+        events.oneShotSubscribe(events.NEW_IMAGE % camera.name, self.syncROI)
+
+    def syncROI(self, data, *args):
+        # Sync viewCanvas roi to camera's current roi
+        camera = self.getCurrentCamera()
+        roi = camera.getROI()
+        self.roi = roi
+        self.showROI = False
 
     def toggleCrosshair(self, event=None):
         self.showCrosshair = not(self.showCrosshair)
@@ -907,6 +937,10 @@ class ViewCanvas(wx.glcanvas.GLCanvas):
         # TODO: add XYsize and wavelength to saved data. These can be passed as
         # kwargs, but the way per-camera pixel sizes are handled needs to be
         # addressed first. See issue #538.
-        if self.Parent.Parent.curCamera is not None:
-            wls = [self.Parent.Parent.curCamera.wavelength,]
+        camera = self.getCurrentCamera()
+        if camera is not None:
+            wls = [camera.wavelength,]
         cockpit.util.datadoc.writeDataAsMrc(self.imageData, path, wavelengths=wls)
+
+    def getCurrentCamera(self):
+        return self.Parent.Parent.curCamera
