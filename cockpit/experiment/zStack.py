@@ -55,7 +55,6 @@ from cockpit.experiment import actionTable
 from cockpit.experiment import experiment
 
 import decimal
-import math
 
 ## Provided so the UI knows what to call this experiment.
 EXPERIMENT_NAME = 'Z-stack'
@@ -68,29 +67,30 @@ class ZStackExperiment(experiment.Experiment):
     def generateActions(self):
         table = actionTable.ActionTable()
         curTime = 0
-        prevAltitude = None
-        numZSlices = int(math.ceil(self.zHeight / self.sliceHeight))
-        if self.zHeight > 1e-6:
-            # Non-2D experiment; tack on an extra image to hit the top of
-            # the volume.
-            numZSlices += 1
+        prevAltitude = self.zStart
         if self.zPositioner.digital:
             #call the zPositioner to setup the digital Z stack.
             self.zPositioner.setupDigitalStack(self.zStart,self.sliceHeight,
-                                          numZSlices, self.numReps)
+                                          self.numZSlices, self.numReps)
 
-        for zIndex in range(numZSlices):
+        for zIndex in range(self.numZSlices):
             # Move to the next position, then wait for the stage to stabilise.
-            zTarget = self.zStart + self.sliceHeight * zIndex
-            if prevAltitude is not None:
-                motionTime, stabilizationTime = self.zPositioner.getMovementTime(
-                    prevAltitude, zTarget)
-                if self.zPositioner.digital:
-                    table.addToggle(curTime, self.zPositioner)
-                else:
-                    table.addAction(curTime, self.zPositioner, zTarget)
-                curTime += motionTime + stabilizationTime
-            prevAltitude = zTarget
+            if zIndex > 0:
+                delays = []
+                if self.aoHandler:
+                    delays.append(self.aoHandler.get_transition_time_ms())
+                    table.addToggle(curTime, self.aoHandler)
+                if self.aoHandler is None or not self.aoHandler.is_RF_enabled():
+                    zTarget = self.zStart + self.sliceHeight * zIndex
+                    motionTime, stabilizationTime = self.zPositioner.getMovementTime(
+                        prevAltitude, zTarget)
+                    delays.append(motionTime + stabilizationTime)
+                    if self.zPositioner.digital:
+                        table.addToggle(curTime, self.zPositioner)
+                    else:
+                        table.addAction(curTime, self.zPositioner, zTarget)
+                    prevAltitude = zTarget
+                curTime += max(delays)
             # Image the sample.
             for cameras, lightTimePairs in self.exposureSettings:
                 curTime = self.expose(curTime, cameras, lightTimePairs, table)
@@ -99,14 +99,20 @@ class ZStackExperiment(experiment.Experiment):
                 curTime += decimal.Decimal('1e-10')
 
         if self.numReps > 1:
-            # Move to the start position in anticipation for next repetition
-            motionTime, stabilizationTime = self.zPositioner.getMovementTime(
-                self.zHeight, self.zStart)
-            if self.zPositioner.digital:
-                table.addToggle(curTime, self.zPositioner)
-            else:
-                table.addAction(curTime, self.zPositioner, self.zStart)
-            curTime += motionTime + stabilizationTime
+            # Transition to the next AO shape in anticipation for next repetition
+            if self.aoHandler:
+                table.addToggle(curTime, self.aoHandler)
+                curTime += self.aoHandler.get_transition_time_ms()
+            # Move to the start position in anticipation for next repetition,
+            # but only if not doing remote focusing
+            if self.aoHandler is None or not self.aoHandler.is_RF_enabled():
+                motionTime, stabilizationTime = self.zPositioner.getMovementTime(
+                    prevAltitude, self.zStart)
+                if self.zPositioner.digital:
+                    table.addToggle(curTime, self.zPositioner)
+                else:
+                    table.addAction(curTime, self.zPositioner, self.zStart)
+                curTime += motionTime + stabilizationTime
             # Wait for all cameras to be ready before starting the next repetition
             cameraReadyTime = 0
             for cameras, lightTimePairs in self.exposureSettings:

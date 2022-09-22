@@ -65,6 +65,7 @@ import gc
 import os
 import threading
 import time
+import math
 import wx
 
 
@@ -116,13 +117,21 @@ class Experiment:
     def __init__(self, numReps, repDuration,
             zPositioner, altBottom, zHeight, sliceHeight,
             exposureSettings, otherHandlers = [],
-            metadata = '', savePath = ''):
+            metadata = '', savePath = '',
+            aoHandler = None, aoRFBottom = None):
         self.numReps = numReps
         self.repDuration = repDuration
         self.zPositioner = zPositioner
+        self.aoHandler = aoHandler
+        self.aoRFBottom = aoRFBottom
         self.altBottom = altBottom
         self.zHeight = zHeight
         self.sliceHeight = sliceHeight
+        self.numZSlices = int(math.ceil(self.zHeight / self.sliceHeight))
+        if self.zHeight > 1e-6:
+            # Non-2D experiment; tack on an extra image to hit the top of
+            # the volume.
+            self.numZSlices += 1
         self.exposureSettings = exposureSettings
 
         self.cameras = []
@@ -293,8 +302,6 @@ class Experiment:
     ## Prepare all of the handlers needed in the experiment so that they're
     # in the correct mode.
     def prepareHandlers(self):
-        # Store the pre-experiment altitude.
-        self.initialAltitude = cockpit.interfaces.stageMover.getPosition()[-1]
         # Ensure that we're the only ones moving things around.
         cockpit.interfaces.stageMover.waitForStop()
         # TODO: Handling multiple movers on an axis is broken. Do not proceed if
@@ -303,9 +310,25 @@ class Experiment:
         if (cockpit.interfaces.stageMover.mover.curHandlerIndex == 0):
             wx.MessageBox("Wrong axis mover selected.")
             raise Exception("Wrong axis mover selected.")
-        # Prepare our position.
-        cockpit.interfaces.stageMover.goToZ(self.altBottom, shouldBlock = True)
-        self.zStart = cockpit.interfaces.stageMover.getAllPositions()[cockpit.interfaces.stageMover.mover.curHandlerIndex][-1]
+        # Store the pre-experiment altitude and prepare our position.
+        if (
+            (self.aoHandler is None or not self.aoHandler.is_RF_enabled())
+            and not self.zPositioner.digital
+        ):
+            # This is a mechanical positioner, i.e. not remote focusing
+            if self.zPositioner.digital:
+                self.zStart = self.altBottom
+            else:
+                self.initialAltitude = (
+                    cockpit.interfaces.stageMover.getPosition()[-1]
+                )
+                cockpit.interfaces.stageMover.goToZ(
+                    self.altBottom,
+                    shouldBlock = True
+                )
+                self.zStart = cockpit.interfaces.stageMover.getAllPositions()[
+                    cockpit.interfaces.stageMover.mover.curHandlerIndex
+                ][-1]
         events.publish(events.PREPARE_FOR_EXPERIMENT, self)
         # Prepare cameras.
         for camera in self.cameras:

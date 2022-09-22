@@ -75,6 +75,7 @@ OBJECTIVE = "objective"
 POWER_CONTROL = "power control"
 SERVER = "server"
 STAGE_POSITIONER = "stage positioner"
+AO_DEVICE = "AO device"
 
 SKIP_CONFIG = ['server']
 

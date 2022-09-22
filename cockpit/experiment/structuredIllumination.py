@@ -60,7 +60,6 @@ import cockpit.util.datadoc
 import cockpit.util.userConfig
 
 import decimal
-import math
 import numpy
 import os
 import tempfile
@@ -191,11 +190,6 @@ class SIExperiment(experiment.Experiment):
         super().__init__(*args, **kwargs)
         self.numAngles = numAngles
         self.numPhases = numPhases
-        self.numZSlices = int(math.ceil(self.zHeight / self.sliceHeight))
-        if self.zHeight > 1e-6:
-            # Non-2D experiment; tack on an extra image to hit the top of
-            # the volume.
-            self.numZSlices += 1
         self.collectionOrder = collectionOrder
         self.angleHandler = angleHandler
         self.phaseHandler = phaseHandler
@@ -213,10 +207,14 @@ class SIExperiment(experiment.Experiment):
             for j in range(maxVals[ordering[1]]):
                 for k in range(maxVals[ordering[2]]):
                     vals = (i, j, k)
-                    angle = vals[ordering.index(0)]
-                    phase = vals[ordering.index(1)]
-                    z = vals[ordering.index(2)]
-                    yield (angle, phase, self.zStart + z * self.sliceHeight)
+                    angle_index = vals[ordering.index(0)]
+                    phase_index = vals[ordering.index(1)]
+                    z_index = vals[ordering.index(2)]
+                    if self.aoHandler and self.aoHandler.is_RF_enabled():
+                        z = self.aoRFBottom + z_index * self.sliceHeight
+                    else:
+                        z = self.zStart + z_index * self.sliceHeight
+                    yield (angle_index, phase_index, z)
 
 
     def prepareHandlers(self):
@@ -285,13 +283,19 @@ class SIExperiment(experiment.Experiment):
                 curTime += decimal.Decimal(".001")
 
             if prevZ is not None and z != prevZ:
-                delay = sum(self.zPositioner.getMovementTime(prevZ, z))
+                # Change the shape of the adaptive element
+                if self.aoHandler:
+                    delay = self.aoHandler.get_transition_time_ms()
+                    table.addToggle(curTime, self.aoHandler)
+                    delayBeforeImaging = max(delayBeforeImaging, delay)
                 # Move to the next position.
-                if self.zPositioner.digital:
-                    table.addToggle(curTime, self.zPositioner)
-                else:
-                    table.addAction(curTime, self.zPositioner, z)
-                delayBeforeImaging = max(delayBeforeImaging, delay)
+                if self.aoHandler is None or not self.aoHandler.is_RF_enabled():
+                    delay = sum(self.zPositioner.getMovementTime(prevZ, z))
+                    if self.zPositioner.digital:
+                        table.addToggle(curTime, self.zPositioner)
+                    else:
+                        table.addAction(curTime, self.zPositioner, z)
+                    delayBeforeImaging = max(delayBeforeImaging, delay)
                 # Sorting delay
                 curTime += decimal.Decimal('.001')
 
@@ -311,21 +315,29 @@ class SIExperiment(experiment.Experiment):
         if self.numReps > 1:
             wait_times = []
             order_delay = decimal.Decimal('.001')
-            # Move to the start position in anticipation for next repetition
-            if self.zPositioner.digital:
-                table.addToggle(curTime + order_delay, self.zPositioner)
-            else:
-                table.addAction(
-                    curTime + order_delay,
-                    self.zPositioner,
-                    self.zStart
+            # Transition to the next AO shape in anticipation for the next
+            # repetition
+            if self.aoHandler:
+                table.addToggle(curTime + order_delay, self.aoHandler)
+                order_delay += order_delay
+                wait_times.append(self.aoHandler.get_transition_time_ms())
+            # Move to the start position in anticipation for next repetition,
+            # but only if this is not a remote focusing experiment
+            if self.aoHandler is None or not self.aoHandler.is_RF_enabled():
+                if self.zPositioner.digital:
+                    table.addToggle(curTime + order_delay, self.zPositioner)
+                else:
+                    table.addAction(
+                        curTime + order_delay,
+                        self.zPositioner,
+                        self.zStart
+                    )
+                order_delay += order_delay
+                wait_times.append(
+                    sum(
+                        self.zPositioner.getMovementTime(prevZ, self.zStart)
+                    )
                 )
-            order_delay += order_delay
-            wait_times.append(
-                sum(
-                    self.zPositioner.getMovementTime(self.zHeight, self.zStart)
-                )
-            )
             # Move to starting angle
             if self.angleHandler is not None:
                 angle_prev = self.angleHandler.indexedPosition(prevAngleIndex)

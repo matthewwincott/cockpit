@@ -465,6 +465,25 @@ class ExperimentConfigPanel(wx.Panel):
             zHeight = 1e-6
             sliceHeight = 1e-6
 
+        aoHandler = None
+        aoRFBottom = None
+        aohandlers = depot.getHandlersOfType(depot.AO_DEVICE)
+        if len(aohandlers) > 0 and aohandlers[0].is_eligible_for_experiments():
+            aoHandler = aohandlers[0]
+            if aoHandler.is_RF_enabled():
+                if self.zPositionMode.GetStringSelection() == 'Use saved top/bottom':
+                    raise Exception(
+                        "Remote focusing experiments do not work with saved "
+                        "top and bottom positions."
+                    )
+                aoRFBottom = aoHandler.get_RF_position() - zHeight / 2
+                ao_rf_limits = aoHandler.get_RF_limits()
+                if aoRFBottom < ao_rf_limits[0] or (aoRFBottom + zHeight) > ao_rf_limits[1]:
+                    raise Exception(
+                        f"Selected stack range {(aoRFBottom, aoRFBottom + zHeight)}"
+                        f" is outside limits {ao_rf_limits}."
+                    )
+
         try:
             savePath = self.filepath_panel.GetPath()
         except Exception:
@@ -481,7 +500,9 @@ class ExperimentConfigPanel(wx.Panel):
                 'zHeight': zHeight,
                 'sliceHeight': sliceHeight,
                 'exposureSettings': exposureSettings,
-                'savePath': savePath
+                'savePath': savePath,
+                "aoHandler": aoHandler,
+                "aoRFBottom": aoRFBottom
         }
         experimentType = self.experimentType.GetStringSelection()
         module = self.experimentStringToModule[experimentType]
