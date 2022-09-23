@@ -190,7 +190,7 @@ class AerotechZStage(device.Device):
             sleep(0.1)
         self.position = self.command(b'CMDPOS').decode()
         events.publish(events.STAGE_MOVER, axis)
-        events.publish(events.STAGE_STOPPED, '%d mover' % axis)
+        events.publish(events.STAGE_STOPPED, '%d %s' % (axis, NAME_STRING))
         self.command (b'DISABLE')
 
 
