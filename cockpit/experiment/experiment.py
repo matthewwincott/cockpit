@@ -241,6 +241,11 @@ class Experiment:
         # display appropriate warnings.
         self.lastMinuteActions()
 
+        # Check the abort status before running the experiment
+        if self.shouldAbort:
+            self.cleanup()
+            return False
+
         self._run_thread = threading.Thread(target=self.execute,
                                             name="Experiment-execute")
 
@@ -312,8 +317,7 @@ class Experiment:
             raise Exception("Wrong axis mover selected.")
         # Store the pre-experiment altitude and prepare our position.
         if (
-            (self.aoHandler is None or not self.aoHandler.is_RF_enabled())
-            and not self.zPositioner.digital
+            self.aoHandler is None or not self.aoHandler.is_RF_enabled()
         ):
             # This is a mechanical positioner, i.e. not remote focusing
             if self.zPositioner.digital:
