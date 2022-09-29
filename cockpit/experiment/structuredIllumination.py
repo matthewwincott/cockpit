@@ -65,6 +65,7 @@ import os
 import tempfile
 import shutil
 import wx
+import time
 
 ## Provided so the UI knows what to call this experiment.
 EXPERIMENT_NAME = 'Structured Illumination'
@@ -554,7 +555,9 @@ class SIExperiment(experiment.Experiment):
     def cleanup(self, runThread = None, saveThread = None):
         super().cleanup(runThread, saveThread)
         if self.savePath:
+            print(f"[{time.strftime('%Y/%m/%d %H:%M:%S')}] Reordering of Z dimension starting for file '{self.savePath}'...")
             self.reorder_img_file()
+            print(f"[{time.strftime('%Y/%m/%d %H:%M:%S')}] Reordering of Z dimension finished for file '{self.savePath}'!")
         return
 
 
